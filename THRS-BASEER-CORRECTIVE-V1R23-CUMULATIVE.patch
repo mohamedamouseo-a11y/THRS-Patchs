@@ -1,0 +1,1436 @@
+diff --git a/APPLY-THRS-BASEER-V1R22-FULL-SOURCE.sh b/APPLY-THRS-BASEER-V1R22-FULL-SOURCE.sh
+index 6854dca..b50b640 100755
+--- a/APPLY-THRS-BASEER-V1R22-FULL-SOURCE.sh
++++ b/APPLY-THRS-BASEER-V1R22-FULL-SOURCE.sh
+@@ -20,9 +20,13 @@ verify_pm2(){ local s; s="$(mktemp)"; pm2 jlist >"$s"; node - "$s" "$PM2_NAMES"
+ const fs=require('fs'),path=require('path'),rows=JSON.parse(fs.readFileSync(process.argv[2],'utf8')),names=process.argv[3].trim().split(/\s+/),target=fs.realpathSync.native(process.argv[4]);const inside=v=>{if(!v)return false;try{const r=fs.realpathSync.native(v);return r===target||r.startsWith(target+path.sep)}catch{return false}};for(const n of names){const x=rows.find(r=>r.name===n);if(!x)throw Error(`missing PM2 process: ${n}`);const e=x.pm2_env||{};if(e.status!=='online'||Number(x.pid)<=0||!inside(e.pm_cwd||e.cwd)||!inside(e.pm_exec_path))throw Error(`invalid PM2 binding/status: ${n}`)}
+ NODE
+ rm -f "$s"; }
+-verify_uploads_tree(){ [[ ! -e "$1" ]] && return 0; python3 - "$1" <<'PY'
++verify_uploads_tree(){ [[ ! -e "$1" && ! -L "$1" ]] && return 0; python3 - "$1" <<'PY'
+ import os,stat,sys
+-for current,dirs,files in os.walk(os.path.realpath(sys.argv[1]),followlinks=False):
++root=sys.argv[1]
++info=os.lstat(root)
++if stat.S_ISLNK(info.st_mode) or not stat.S_ISDIR(info.st_mode):raise SystemExit(f'uploads root must be a real directory: {root}')
++root=os.path.realpath(root)
++for current,dirs,files in os.walk(root,followlinks=False):
+  for n in list(dirs)+list(files):
+   p=os.path.join(current,n);i=os.lstat(p)
+   if stat.S_ISLNK(i.st_mode) or not(stat.S_ISDIR(i.st_mode) or stat.S_ISREG(i.st_mode)):raise SystemExit(f'unsafe uploads entry: {p}')
+diff --git a/APPLY-THRS-BASEER-V1R23-FULL-SOURCE.sh b/APPLY-THRS-BASEER-V1R23-FULL-SOURCE.sh
+new file mode 100755
+index 0000000..41193d1
+--- /dev/null
++++ b/APPLY-THRS-BASEER-V1R23-FULL-SOURCE.sh
+@@ -0,0 +1,87 @@
++#!/usr/bin/env bash
++set -Eeuo pipefail
++ARCHIVE="${1:-}"; SHA_FILE="${2:-}"; TARGET="${3:-}"; HEALTH_URL="${BASEER_HEALTHCHECK_URL:-${4:-}}"; PM2_NAMES="${BASEER_PM2_NAMES:-thrs-backend baseer-worker}"
++[[ -f "$ARCHIVE" && -f "$SHA_FILE" && -d "$TARGET" && -n "$HEALTH_URL" ]] || { echo "Usage: $0 FULL_SOURCE.tar.gz FULL_SOURCE.sha256 TARGET HEALTH_URL" >&2; exit 2; }
++for c in sha256sum python3 tar npm flock rsync pm2 curl node realpath cp stat; do command -v "$c" >/dev/null 2>&1 || { echo "Missing command: $c" >&2; exit 2; }; done
++ARCHIVE="$(realpath "$ARCHIVE")"; SHA_FILE="$(realpath "$SHA_FILE")"; TARGET="$(realpath "$TARGET")"
++PARENT="$(dirname "$TARGET")"; NAME="$(basename "$TARGET")"; STAMP="$(date +%Y%m%d_%H%M%S)"
++WORK="$PARENT/.${NAME}-v1r23-build-$STAMP"; RELEASE="$PARENT/.${NAME}-v1r23-release-$STAMP"; STATE_DIR="$PARENT/.${NAME}-v1r23-state-$STAMP"; LOCK="$PARENT/.${NAME}-v1r23.lock"
++PREVIOUS_MANIFEST="$STATE_DIR/previous-release.manifest.jsonl"; CURRENT_MANIFEST="$STATE_DIR/current-release.manifest.jsonl"; MANIFEST_TOOL="$STATE_DIR/baseer-v1r21-runtime-manifest.py"; STATE_CHECKSUMS="$STATE_DIR/STATE-CHECKSUMS.sha256"
++SWAPPED=0; STOPPED=0; SUCCESS=0
++atomic_exchange(){ python3 - "$1" "$2" <<'PY'
++import ctypes,os,platform,sys
++l=os.fsencode(os.path.abspath(sys.argv[1]));r=os.fsencode(os.path.abspath(sys.argv[2]))
++if os.stat(l).st_dev!=os.stat(r).st_dev:raise SystemExit('atomic exchange requires same filesystem')
++libc=ctypes.CDLL(None,use_errno=True);f=getattr(libc,'renameat2',None);n={'x86_64':316,'aarch64':276}.get(platform.machine());result=f(-100,l,-100,r,2) if f else libc.syscall(n,-100,l,-100,r,2)
++if result!=0:raise OSError(ctypes.get_errno(),os.strerror(ctypes.get_errno()))
++PY
++}
++verify_pm2(){ local s; s="$(mktemp)"; pm2 jlist >"$s"; node - "$s" "$PM2_NAMES" "$TARGET" <<'NODE'
++const fs=require('fs'),path=require('path'),rows=JSON.parse(fs.readFileSync(process.argv[2],'utf8')),names=process.argv[3].trim().split(/\s+/),target=fs.realpathSync.native(process.argv[4]);const inside=v=>{if(!v)return false;try{const r=fs.realpathSync.native(v);return r===target||r.startsWith(target+path.sep)}catch{return false}};for(const n of names){const x=rows.find(r=>r.name===n);if(!x)throw Error(`missing PM2 process: ${n}`);const e=x.pm2_env||{};if(e.status!=='online'||Number(x.pid)<=0||!inside(e.pm_cwd||e.cwd)||!inside(e.pm_exec_path))throw Error(`invalid PM2 binding/status: ${n}`)}
++NODE
++rm -f "$s"; }
++verify_uploads_tree(){ [[ ! -e "$1" && ! -L "$1" ]] && return 0; python3 - "$1" <<'PY'
++import os,stat,sys
++root=sys.argv[1]
++info=os.lstat(root)
++if stat.S_ISLNK(info.st_mode) or not stat.S_ISDIR(info.st_mode):raise SystemExit(f'uploads root must be a real directory: {root}')
++root=os.path.realpath(root)
++for current,dirs,files in os.walk(root,followlinks=False):
++ for n in list(dirs)+list(files):
++  p=os.path.join(current,n);i=os.lstat(p)
++  if stat.S_ISLNK(i.st_mode) or not(stat.S_ISDIR(i.st_mode) or stat.S_ISREG(i.st_mode)):raise SystemExit(f'unsafe uploads entry: {p}')
++  if stat.S_ISREG(i.st_mode) and i.st_nlink!=1:raise SystemExit(f'hard-linked uploads file: {p}')
++PY
++}
++copy_env(){ local src="$1" dst="$2"; [[ ! -e "$src" ]]&&return 0; [[ -f "$src" && ! -L "$src" && "$(stat -c %h "$src")" == 1 ]]||{ echo "Unsafe env: $src" >&2;return 1;};rm -f "$dst";cp -p --no-dereference "$src" "$dst"; }
++cleanup_runners(){ local root="$1"; [[ -f "$root/backend/scripts/baseer-runner-cleanup.js" ]]&& (cd "$root/backend"&&BASEER_RUNNER_PROJECT_ROOT="$TARGET/backend" node scripts/baseer-runner-cleanup.js) || true; }
++verify_state(){ (cd "$STATE_DIR"&&sha256sum -c "$(basename "$STATE_CHECKSUMS")" >/dev/null); }
++restart_verify(){ local probe="${1:-false}" failed=0;for p in $PM2_NAMES;do pm2 restart "$p" --update-env >/dev/null 2>&1||failed=1;done;sleep "${BASEER_STABILITY_SECONDS:-8}";verify_pm2||failed=1;curl --fail --silent --show-error --retry 5 --retry-delay 2 --max-time 20 "$HEALTH_URL" >/dev/null||failed=1;if [[ "$probe" == true && "$failed" == 0 ]];then (cd "$TARGET/backend"&&npm run baseer:verify-worker-live-v1r23)||failed=1;(cd "$TARGET/backend"&&npm run test:api-postgres)||failed=1;fi;return "$failed"; }
++rollback_error(){ local code=$? failed=0;trap - ERR INT TERM;set +e;[[ "$SUCCESS" == 1 ]]&&return 0
++ if [[ "$SWAPPED" == 1 ]];then
++  verify_state||failed=1;python3 "$MANIFEST_TOOL" verify-runtime "$RELEASE" "$PREVIOUS_MANIFEST"||failed=1
++  copy_env "$TARGET/backend/.env" "$RELEASE/backend/.env"||failed=1;copy_env "$TARGET/frontend/.env" "$RELEASE/frontend/.env"||failed=1
++  for p in $PM2_NAMES;do pm2 stop "$p" >/dev/null 2>&1||failed=1;done;STOPPED=1;cleanup_runners "$TARGET"
++  verify_uploads_tree "$TARGET/backend/uploads"||failed=1
++  if [[ "$failed" == 0 && -d "$TARGET/backend/uploads" ]];then mkdir -p "$RELEASE/backend/uploads";rsync -a --delete "$TARGET/backend/uploads/" "$RELEASE/backend/uploads/"||failed=1;fi
++  verify_uploads_tree "$RELEASE/backend/uploads"||failed=1;[[ "$failed" == 0 ]]&&atomic_exchange "$TARGET" "$RELEASE"||failed=1
++  if [[ "$failed" == 0 ]]&&restart_verify false;then SWAPPED=0;STOPPED=0;else failed=1;fi
++  [[ "$failed" == 0 ]]||{ echo "CRITICAL: V1R23 automatic rollback failed." >&2;exit 91;}
++ elif [[ "$STOPPED" == 1 ]];then restart_verify false||exit 92;fi
++ rm -rf "$WORK";[[ "$SWAPPED" == 0 && -d "$RELEASE" ]]&&rm -rf "$RELEASE";echo "V1R23 deployment failed; verified V1R22 restored. Additive migrations may remain." >&2;exit "$code"; }
++trap rollback_error ERR INT TERM
++exec 9>"$LOCK";flock -n 9||{ echo "Another THRS deployment is running." >&2;exit 3; }
++EXPECTED="$(awk 'NF{print $1;exit}' "$SHA_FILE")";[[ "$EXPECTED" =~ ^[0-9a-fA-F]{64}$ ]]||exit 3;TRUSTED="${BASEER_TRUSTED_SOURCE_SHA256:-}";[[ "$TRUSTED" =~ ^[0-9a-fA-F]{64}$ && "${TRUSTED,,}" == "${EXPECTED,,}" ]]||{ echo "Trusted source SHA required." >&2;exit 3; };[[ "$(sha256sum "$ARCHIVE"|awk '{print $1}')" == "$EXPECTED" ]]||exit 3
++TOP="$(python3 - "$ARCHIVE" <<'PY'
++import posixpath,sys,tarfile
++seen=set();top=set()
++with tarfile.open(sys.argv[1],'r:*') as a:
++ for m in a.getmembers():
++  name=m.name
++  while name.startswith('./'):name=name[2:]
++  n=posixpath.normpath(name)
++  if not n or n=='.':continue
++  parts=n.split('/');top.add(parts[0])
++  if name.startswith('/') or n.startswith('../') or '..' in parts or '\\' in n or '\0' in n:raise SystemExit('unsafe path')
++  if n in seen:raise SystemExit('duplicate path')
++  seen.add(n)
++  if parts[-1]=='.env' or '.git' in parts or 'node_modules' in parts:raise SystemExit('forbidden member')
++  if not(m.isdir() or m.isfile()):raise SystemExit('non-regular member')
++if len(top)!=1:raise SystemExit('one top-level directory required')
++print(next(iter(top)))
++PY
++)"
++mkdir -p "$WORK" "$STATE_DIR";chmod 700 "$STATE_DIR";tar -xzf "$ARCHIVE" -C "$WORK" --no-same-owner;SOURCE="$WORK/$TOP";[[ -f "$SOURCE/backend/package.json" && -f "$SOURCE/frontend/package.json" ]]||exit 3;mv "$SOURCE" "$RELEASE";rm -rf "$WORK"
++# Exact V1R21 source gate before package installation or DB access.
++python3 "$RELEASE/scripts/baseer-v1r23-source-manifest.py" verify "$TARGET" "$RELEASE/BASELINE-THRS-BASEER-V1R22-SOURCE-MANIFEST.jsonl"
++copy_env "$TARGET/backend/.env" "$RELEASE/backend/.env";copy_env "$TARGET/frontend/.env" "$RELEASE/frontend/.env";rm -rf "$RELEASE/backend/uploads" "$RELEASE/backend/node_modules" "$RELEASE/frontend/node_modules" "$RELEASE/frontend/build"
++(cd "$RELEASE/backend";npm ci;npm run prisma:generate;npm run verify;npm run baseer:verify-v1r23;npm run baseer:verify-schema-v1r23)
++(cd "$RELEASE/frontend";npm ci;npm run build;test -f build/index.html)
++cp -p "$RELEASE/scripts/baseer-v1r21-runtime-manifest.py" "$MANIFEST_TOOL";chmod 500 "$MANIFEST_TOOL";python3 "$MANIFEST_TOOL" generate-runtime "$TARGET" "$PREVIOUS_MANIFEST";python3 "$MANIFEST_TOOL" generate-runtime "$RELEASE" "$CURRENT_MANIFEST"
++printf 'TARGET=%q\nPREVIOUS_RELEASE=%q\nHEALTH_URL=%q\nPM2_NAMES=%q\n' "$TARGET" "$RELEASE" "$HEALTH_URL" "$PM2_NAMES">"$STATE_DIR/deployment.env";(cd "$STATE_DIR"&&sha256sum "$(basename "$PREVIOUS_MANIFEST")" "$(basename "$CURRENT_MANIFEST")" "$(basename "$MANIFEST_TOOL")" deployment.env>"$(basename "$STATE_CHECKSUMS")");chmod 400 "$PREVIOUS_MANIFEST" "$CURRENT_MANIFEST" "$STATE_CHECKSUMS" "$STATE_DIR/deployment.env"
++verify_state;verify_pm2;for p in $PM2_NAMES;do pm2 stop "$p" >/dev/null;done;STOPPED=1;cleanup_runners "$RELEASE";verify_state;python3 "$MANIFEST_TOOL" verify-runtime "$TARGET" "$PREVIOUS_MANIFEST";python3 "$MANIFEST_TOOL" verify-runtime "$RELEASE" "$CURRENT_MANIFEST"
++verify_uploads_tree "$TARGET/backend/uploads";if [[ -d "$TARGET/backend/uploads" ]];then mkdir -p "$RELEASE/backend/uploads";rsync -a --delete "$TARGET/backend/uploads/" "$RELEASE/backend/uploads/";fi;verify_uploads_tree "$RELEASE/backend/uploads";atomic_exchange "$TARGET" "$RELEASE";SWAPPED=1
++# DB changes happen only after the atomic source swap, while services are stopped.
++(cd "$TARGET/backend";npm run prisma:migrate;npm run baseer:verify-postgres-v1r18;npm run baseer:verify-postgres-v1r20;npm run test:postgres)
++for p in $PM2_NAMES;do pm2 restart "$p" --update-env >/dev/null;done;STOPPED=0;sleep "${BASEER_STABILITY_SECONDS:-8}";verify_pm2;curl --fail --silent --show-error --retry 5 --retry-delay 2 --max-time 20 "$HEALTH_URL" >/dev/null;(cd "$TARGET/backend";npm run baseer:verify-worker-live-v1r23;npm run test:api-postgres)
++SUCCESS=1;trap - ERR INT TERM;echo "BASEER_V1R23_FULL_SOURCE_APPLY_OK";echo "STATE_DIR=$STATE_DIR";echo "PREVIOUS_RELEASE=$RELEASE"
+diff --git a/BASELINE-THRS-BASEER-V1R22-SOURCE-MANIFEST.jsonl b/BASELINE-THRS-BASEER-V1R22-SOURCE-MANIFEST.jsonl
+new file mode 100644
+index 0000000..70d7977
+--- /dev/null
++++ b/BASELINE-THRS-BASEER-V1R22-SOURCE-MANIFEST.jsonl
+@@ -0,0 +1,622 @@
++{"mode":420,"path":".gitignore","sha256":"5ecb09eb051e50aedb867c39f3fefc24e0d2b19b03769761d8a9fdbc2a669b9e","size":1123}
++{"mode":493,"path":"APPLY-THRS-BASEER-CORRECTIVE-V1R16.sh","sha256":"78dbc4b40993bda0c8e83904817b569035a2c6dd25c88f702ae0a258c96b479b","size":10480}
++{"mode":493,"path":"APPLY-THRS-BASEER-CORRECTIVE-V1R17.sh","sha256":"84a8a7a0300597004021a03c391a74d35596f74d4a33e031fb12bc653de77675","size":16300}
++{"mode":493,"path":"APPLY-THRS-BASEER-CORRECTIVE-V1R18.sh","sha256":"c35062b3ac4af6096191d1054a5009a62103994aeeb6d98c7350a2e5db866dfd","size":16935}
++{"mode":493,"path":"APPLY-THRS-BASEER-V1R19-FULL-SOURCE.sh","sha256":"1b96744a99c2897d55ed1532840191aa87852fec5058f85fa7fbb35c135b6fc9","size":10693}
++{"mode":493,"path":"APPLY-THRS-BASEER-V1R20-FULL-SOURCE.sh","sha256":"a979aacdfe49bcfe01ffb4ec535438d00f8db7063b288cb74ea10a2008c26073","size":10706}
++{"mode":493,"path":"APPLY-THRS-BASEER-V1R21-FULL-SOURCE.sh","sha256":"02541bb97a8d4c7d27c6ad98370f6243410813a9a1c02c199c449d56ce012cf5","size":9316}
++{"mode":493,"path":"APPLY-THRS-BASEER-V1R22-FULL-SOURCE.sh","sha256":"2cc0a6be2bead482cd8ddd2250ac969417442d21e2b0156680bf00fd65ce1a9d","size":9283}
++{"mode":420,"path":"BASELINE-THRS-BASEER-V1R15-MISSING.txt","sha256":"2def8ff80bd845613dcc66b80f6ca93eddfb5df34be99fcafca660f4cfa72b4c","size":559}
++{"mode":420,"path":"BASELINE-THRS-BASEER-V1R15.sha256","sha256":"82f762c71f925a22f92f6cecc19409848d15a9554b03ae3786e549ccb6fcff64","size":322}
++{"mode":420,"path":"BASELINE-THRS-BASEER-V1R21-SOURCE-MANIFEST.jsonl","sha256":"6425b28d15a06c0de31723fb9286e9439e7faf438ea61491f5a3ab420d9392e9","size":93270}
++{"mode":493,"path":"GENERATE-THRS-BASEER-V1R16-TRUSTED-MANIFEST.sh","sha256":"1b5f95526faf493d8c3549a7b76f023bf4335f56bda80a74323002935663049c","size":1100}
++{"mode":493,"path":"GENERATE-THRS-BASEER-V1R17-TRUSTED-MANIFEST.sh","sha256":"45d7315a7fd2a5c0b0c4b5dc7ac9b8b875466a74958ce9ad11cdefea63b5ccfd","size":1100}
++{"mode":420,"path":"PROJECT_SUMMARY.md","sha256":"754a2513a7bb51f440348707c596008cc91c4ef0c643579a433de3f69dba1d37","size":6614}
++{"mode":420,"path":"README-THRS-BASEER-CORRECTIVE-V1R16-AR.md","sha256":"e4183cc274435a2517b86d745585722da8fc380e07d3dca309c663034e6b0343","size":3046}
++{"mode":420,"path":"README-THRS-BASEER-CORRECTIVE-V1R17-AR.md","sha256":"aadcea77004a82d8be56f18599db971b25ae4184f39a034279c110a53ea7605a","size":2261}
++{"mode":420,"path":"README-THRS-BASEER-CORRECTIVE-V1R18-AR.md","sha256":"0e1c09b1d65c55d61eeb0eaafec75ff13ac02c602b8565e4d70612c6cf57b0d4","size":2052}
++{"mode":420,"path":"README-THRS-BASEER-CUMULATIVE-V1R18-FULL-SOURCE-AR.md","sha256":"62afe1d9e8441ad261c19a97cc4b5c89039b3ae274a9f92880ff28a23d3f0dae","size":2205}
++{"mode":420,"path":"REPLIT-PROMPT-THRS-BASEER-CORRECTIVE-V1R16-AR.txt","sha256":"cd0681a0e3d664e1815b3c6e652fac180860be1a02d3f111a5dfbda026a5960a","size":940}
++{"mode":420,"path":"REPLIT-PROMPT-THRS-BASEER-CORRECTIVE-V1R17-AR.txt","sha256":"2bed79850bcec6e9b3c4da76e7d41cc6f2756e55f6b8f6dba7baf392b81a7fdd","size":1064}
++{"mode":420,"path":"REPLIT-PROMPT-THRS-BASEER-CORRECTIVE-V1R18-AR.txt","sha256":"31c2925fe7e9529b92a810c92c1c539d7ca6a252d7bc7b7b3c1342e6b2458bde","size":886}
++{"mode":420,"path":"REPLIT-PROMPT-THRS-BASEER-CUMULATIVE-V1R18-FULL-SOURCE-AR.txt","sha256":"e3bc8d5a61ab12958bd92119d79535f30888ab7673fd6f505548c58d9c3b3857","size":1133}
++{"mode":493,"path":"ROLLBACK-THRS-BASEER-CORRECTIVE-V1R16.sh","sha256":"05aa1740c9e64ee0bad2de45e5cc669b92e4b72ad64740431837d1718d179803","size":4667}
++{"mode":493,"path":"ROLLBACK-THRS-BASEER-CORRECTIVE-V1R17.sh","sha256":"6596dc234a2fc9bae7afa6efc5398fdd142fdafa970cb5dacd6d6918e46b7ae2","size":7825}
++{"mode":493,"path":"ROLLBACK-THRS-BASEER-CORRECTIVE-V1R18.sh","sha256":"04d1a3b79fca8517cf7de62eebbfd5c9b00efcf9d9d9c92fbcf2720064aac417","size":10783}
++{"mode":493,"path":"ROLLBACK-THRS-BASEER-V1R19-FULL-SOURCE.sh","sha256":"e284255b1a679d7d30897cb744c797cd564ccd13bd6c38d0d631e3d7dd30d95e","size":6461}
++{"mode":493,"path":"ROLLBACK-THRS-BASEER-V1R20-FULL-SOURCE.sh","sha256":"a01be20da08e3a9156936ea90d9f1df4c1353df6b6ae344face431bf1b19a6c5","size":6501}
++{"mode":493,"path":"ROLLBACK-THRS-BASEER-V1R21-FULL-SOURCE.sh","sha256":"82f45458786fdb51abbc35982ed00c25799908357552f9e619937b402935f288","size":4418}
++{"mode":493,"path":"ROLLBACK-THRS-BASEER-V1R22-FULL-SOURCE.sh","sha256":"22f905b447e2010b8c66c614811c089460283e4211af0f45cd84b1742f44857f","size":4906}
++{"mode":420,"path":"THRS-BASEER-CORRECTIVE-V1R16-MANIFEST.sha256","sha256":"d705c4e765a15605b0cd61b2f39ec14b8ec8e5f01c7b178fe27a29c35fecf1c0","size":1306}
++{"mode":420,"path":"THRS-BASEER-CORRECTIVE-V1R16-OVERLAY-FILES.txt","sha256":"2def8ff80bd845613dcc66b80f6ca93eddfb5df34be99fcafca660f4cfa72b4c","size":559}
++{"mode":420,"path":"THRS-BASEER-CORRECTIVE-V1R16-VALIDATION-AR.md","sha256":"0959aa23f9539e39b99eb2b50b85309c19ed8439b0b56279376ec9dab03ff0d0","size":2007}
++{"mode":420,"path":"THRS-BASEER-CORRECTIVE-V1R17-MANIFEST.sha256","sha256":"16e7bb96c6d7d79790c20a8bf5d8fd9050e39b03570437c519c1952a27e862be","size":1501}
++{"mode":420,"path":"THRS-BASEER-CORRECTIVE-V1R17-OVERLAY-FILES.txt","sha256":"6dcd4c5ca15d2ac2b704d6266e3ebcae39587be322f2d43bae4b5faf479b9d66","size":577}
++{"mode":420,"path":"THRS-BASEER-CORRECTIVE-V1R17-VALIDATION-AR.md","sha256":"7365afbb9aaa8b38505b942734db7c28e9cb596078ce3da35816601bae269ad0","size":2107}
++{"mode":420,"path":"THRS-BASEER-CORRECTIVE-V1R18-MANIFEST.sha256","sha256":"e1c684400dbde22e75ff94d799e0fe9084372f2662a938e8a21aeb4f4c49440c","size":1501}
++{"mode":420,"path":"THRS-BASEER-CORRECTIVE-V1R18-OVERLAY-FILES.txt","sha256":"9d699f6174700d2d6e69e577387f5556eca49dc03a124e3eb567b75e8400788b","size":577}
++{"mode":420,"path":"THRS-BASEER-CORRECTIVE-V1R18-VALIDATION-AR.md","sha256":"80b0add02342d9f6625f1f0e795ccfca48c24c51f5dd3bb82743e36086bc715a","size":1940}
++{"mode":420,"path":"THRS-BASEER-CUMULATIVE-V1R18-BUILD-INFO.json","sha256":"74d3b389f055c745d028663c1a7958cc48bbef4ac2a8c4894d384008bc1f8daa","size":348}
++{"mode":420,"path":"THRS-BASEER-CUMULATIVE-V1R18-FULL-SOURCE-MANIFEST.sha256","sha256":"816e70d981acd5fcb384e54bd7ab9db3ca3c5264d2fba851dd521719ce392407","size":64102}
++{"mode":420,"path":"THRS-BASEER-CUMULATIVE-V1R18-VALIDATION-AR.md","sha256":"88fa0ff09d95f17a25ece57194111c35963e609ba45072c87df8e0933bc4b57a","size":1412}
++{"mode":420,"path":"THRS-BASEER-V1R17-DEPLOYMENT.txt","sha256":"1e6ba5cd812423ea380e6f83c940d8d898e71217829bedf43377232b4858a9e4","size":125}
++{"mode":420,"path":"THRS-BASEER-V1R18-DEPLOYMENT.txt","sha256":"88c97783555ec70313c7c74b90ade8e1c5ca54909b266e147c298e45cb3336e0","size":138}
++{"mode":420,"path":"backend/.env.example","sha256":"6c1e9bbabc6b4c12e0cef20d53c6ed5863dbe33c4e164287c8669a1938632871","size":2955}
++{"mode":420,"path":"backend/check_prisma.js","sha256":"f21a0cd30b7ae14213af616a69e433acd8016cf3073c7776013bcf9a56acf212","size":290}
++{"mode":420,"path":"backend/count_after.js","sha256":"6e75e9b85ba2463c43f5d1f535d32272ddad8b1544f13cad5de223cff22cddd8","size":711}
++{"mode":420,"path":"backend/count_before.js","sha256":"322afb6a7764237a4c92aad080e3a13ab3f98e822310a173aef5847cae9564a8","size":803}
++{"mode":420,"path":"backend/package-lock.json","sha256":"b3610b6e44933b36c88db244af81cff62374a86d9f4ba564eaa9740ff2c75a7e","size":181639}
++{"mode":420,"path":"backend/package.json","sha256":"713ca18f0881eac9b0117f70acc641ddd0a28a80333fbbe1d9c26456b0d98fde","size":3671}
++{"mode":420,"path":"backend/prisma/manual_migrations/20260323_support_center.sql","sha256":"e718823a04cc4b501f2ff20407a28874e9b7fd7656713b51df88faf4400d576b","size":3097}
++{"mode":436,"path":"backend/prisma/migrations/20260228155104_init/migration.sql","sha256":"29d0d36899ea81a14edbcfe04382cefbc0e8bf1853917e221a4a1181d03bc58f","size":21812}
++{"mode":420,"path":"backend/prisma/migrations/20260305120000_enhance_notification_system/migration.sql","sha256":"23a1f3b725df9a5d5d69889d22f20ba79528c9c835968d57aa8646a0c6c14200","size":1342}
++{"mode":420,"path":"backend/prisma/migrations/20260306220000_rbac_permissions/migration.sql","sha256":"e9648d0183db34c5d844b43fd2f63dfa9a8e93e53775719ba42e500d5528a441","size":1972}
++{"mode":420,"path":"backend/prisma/migrations/20260306230000_add_tscore_system/migration.sql","sha256":"7078f2d8b5f71b385a4ea8a3893268fb894837a587de4b92b3bc0ec4b172af94","size":5082}
++{"mode":420,"path":"backend/prisma/migrations/20260306230500_add_approval_workflows/migration.sql","sha256":"5d6ec3cdbacd4688179a19c29d89b721317b1ef3cd1714ca9bc8ff78633b7fb0","size":3013}
++{"mode":420,"path":"backend/prisma/migrations/20260306230600_add_phase5_feedback_goals_skills_recognition/migration.sql","sha256":"5b72e72deed51256d32602272d52bae6277c8af7ae55be4437f15adf026777c4","size":5552}
++{"mode":420,"path":"backend/prisma/migrations/20260307000000_add_announcements_phase8/migration.sql","sha256":"ebd32949adcd2d762d2578b11331220976aa2ddaf8ffdd8d1700078e162148b2","size":831}
++{"mode":420,"path":"backend/prisma/migrations/20260307_add_benefits/migration.sql","sha256":"de4944cbe140ed41c1358dcd6f22863bb8a8018ec5d5234eb89b7c74a250a02c","size":769}
++{"mode":420,"path":"backend/prisma/migrations/20260307_add_exits/migration.sql","sha256":"76c3249fa4e585d89a4bc5489f05644548296bd425c563899fd266c00d6bd74b","size":1497}
++{"mode":420,"path":"backend/prisma/migrations/20260307_add_shifts_overtime/migration.sql","sha256":"f778e23637d25b2dda2b020af412ca571500cf1c930b7d278ffa7bce9b534232","size":2235}
++{"mode":420,"path":"backend/prisma/migrations/20260307_add_surveys/migration.sql","sha256":"b18e5eeb3a2b8a20ab54bd88e2485f811a5520bb0678e583851d4fd86b0071eb","size":2756}
++{"mode":420,"path":"backend/prisma/migrations/20260418_salary_adjustments/migration.sql","sha256":"e858e59128bb33f7c96837558c1f389a56d3e9e99f00b8ca5a80620ceada6c62","size":1034}
++{"mode":420,"path":"backend/prisma/migrations/20260607_add_shift_swap_requests/migration.sql","sha256":"b3e8ce32985f3f0c0bb4ac2a60e2caf42c1e6b00188d7f128f65bf366dd731fd","size":960}
++{"mode":420,"path":"backend/prisma/migrations/20260607_flexible_work_schedule_calendar/migration.sql","sha256":"342f9218400cf5e232e37ff670d681455b13f1a6436c41b092f2ac6c1a6342b4","size":2104}
++{"mode":420,"path":"backend/prisma/migrations/20260623000100_employee_central_identity/migration.sql","sha256":"18a0ea659a3b0518ebe3fa3f3e18c32833af3d054ec71db0848502b26da2b715","size":465}
++{"mode":420,"path":"backend/prisma/migrations/20260624000100_attendance_import_audit/migration.sql","sha256":"5a48df64d29f108f5a7e77319d3262238ae85f8fdba71233065b0efa5e7561e2","size":4869}
++{"mode":420,"path":"backend/prisma/migrations/20260624000200_attendance_import_replacement_audit/migration.sql","sha256":"e4e590fdedd0069a130825282d2eb9fcae1963dbe1e9367d7ca68177eae92c5a","size":748}
++{"mode":420,"path":"backend/prisma/migrations/20260625000100_missing_production_tables/migration.sql","sha256":"2c1cb78d8d8a0aae6b70abd7e5112090caec8f4ca85e7c9903ceb0ab94b93506","size":18645}
++{"mode":420,"path":"backend/prisma/migrations/20260625000200_missing_production_columns/migration.sql","sha256":"cf02550032e943c98c85535757c2cde84fc1ae2d3861aaaa56c47bcaa538fb93","size":6296}
++{"mode":420,"path":"backend/prisma/migrations/20260626000100_support_center/migration.sql","sha256":"cff7c78b3b0f3dd5c1ac342d50ed858042d2b0a997e29be2cf5115d941d06afc","size":4762}
++{"mode":420,"path":"backend/prisma/migrations/20260627000100_google_drive_upload_foundation/migration.sql","sha256":"a297f6826e36e83dea2c355536c4dd6a61d8b650004f2b1a2a02d5a1af845bf9","size":1816}
++{"mode":420,"path":"backend/prisma/migrations/20260627000200_recruitment_ai_test_score/migration.sql","sha256":"3ecc34f55b51684444e87408e298725ffad3c6df27a619bd99cc323458ee2520","size":203}
++{"mode":420,"path":"backend/prisma/migrations/20260627215000_tos_integration_gateway/migration.sql","sha256":"e9b03e6cb899efbe6548f4c7810313b69708e21b927f24f5d7f6f4a0c581b6e2","size":804}
++{"mode":420,"path":"backend/prisma/migrations/202606300930_attendance_monthly_calendar_deficit_engine/migration.sql","sha256":"1670acc7b06b0470243a8cfeb68c72b940abd18fb0ce6091e1738d5aba2ad69f","size":2613}
++{"mode":420,"path":"backend/prisma/migrations/20260706172000_employees_edit_documents_metadata_fix/migration.sql","sha256":"4669c0642c28482f2618dfe6a3968727308dfd09e7d2ab6f26e13dc6450068ba","size":2319}
++{"mode":420,"path":"backend/prisma/migrations/20260709150000_hourly_leave_permissions/migration.sql","sha256":"41a206c81f90d49c3d2636f54ce85c63717da3f53f1fa45f025a219f90f40e76","size":4831}
++{"mode":420,"path":"backend/prisma/migrations/20260715113000_payroll_basic_salary_change_safe_fix/migration.sql","sha256":"029b4fb8e0b569eafe8ed0a9a29d639d63be28e288cd8b78a653506177936886","size":4419}
++{"mode":420,"path":"backend/prisma/migrations/20260716093000_restore_google_drive_prisma_schema/migration.sql","sha256":"de9190a6c313d9bc63cf5467e4e7043f16031d3321bdc7ac9e458644586653a3","size":1997}
++{"mode":420,"path":"backend/prisma/migrations/20260718113000_v5_schema_contract_hardening/migration.sql","sha256":"19701b8660afe6ac664ab2eff81d4249cdc89acdb520f1a59ee2f0b58a270658","size":10321}
++{"mode":420,"path":"backend/prisma/migrations/20260724150000_baseer_cumulative_v1r18_rebuild/migration.sql","sha256":"d555601d29ce5bc481fcdc91062b49a8c900b9e4d8a4db4d9664f2179bbd3a9b","size":11483}
++{"mode":420,"path":"backend/prisma/migrations/20260724170000_baseer_v1r19_corrective/migration.sql","sha256":"7d259c7d4c98fbdd5839c7bfe065c7c600903895fea53159bfd969a1f887308f","size":11028}
++{"mode":420,"path":"backend/prisma/migrations/20260724193000_baseer_v1r20_corrective/migration.sql","sha256":"8a005110a5117742cf9903b3b4c6982335a6b911a5affefee8ec30ae10e50ed3","size":298}
++{"mode":436,"path":"backend/prisma/migrations/migration_lock.toml","sha256":"693566b52c49db47a2b0901d12400aa3d710d13a49f4a2a154b80c0505ed737c","size":126}
++{"mode":420,"path":"backend/prisma/rollback/20260724150000_baseer_cumulative_v1r18_rebuild.rollback.sql","sha256":"5ab11625a29f879a19dcbdd725aea5b832835f407ac1741a3eb0fe4f83044918","size":614}
++{"mode":420,"path":"backend/prisma/rollback/20260724170000_baseer_v1r19_corrective.rollback.sql","sha256":"6e835a357126454095635e04ec3c5a72059c004bcc463b5566b757b6556e3fff","size":1225}
++{"mode":420,"path":"backend/prisma/rollback/20260724193000_baseer_v1r20_corrective.rollback.sql","sha256":"2f40fb5a985e0900f8fb515f672bdfef4352719a89142edc6effdad3caae09fb","size":191}
++{"mode":420,"path":"backend/prisma/schema.prisma","sha256":"644a17a30b9ceaff86ee7332d55adb877467576f2ce2250fd9e859693122d92b","size":76415}
++{"mode":420,"path":"backend/prisma/seed-permissions.js","sha256":"c981e8dfde230c6d6244ca94c618df8863ea824d905e77ce8394df4a4f1fe78e","size":3820}
++{"mode":420,"path":"backend/prisma/seed-tscore-templates.js","sha256":"e3db052053754bd71848409d66cee9ac6a4d9a4488fc93473d760b1f7f38483f","size":5928}
++{"mode":420,"path":"backend/prisma/seed-workflows.js","sha256":"187a6f6f7cc9aa693a6e1345bf6b7afc9354923ab874b532fa6cacf12ef15da8","size":3096}
++{"mode":420,"path":"backend/prisma/seed.js","sha256":"1c8638fb5055dca0e490cf4c1b6a746cac0e43f874049ac082693cc7819caa17","size":5242}
++{"mode":420,"path":"backend/prisma/seed_help.js","sha256":"984f437ce8f08300ac976108d61a793e426998b7be9a9707b7c339bd2357c299","size":11945}
++{"mode":420,"path":"backend/prisma/seeds/approval-seed.js","sha256":"f54c70da077aff556800d57c0f9e9ea884b8c34f3393f1953bd2dbcf0c04f37b","size":3265}
++{"mode":493,"path":"backend/scripts/baseer-action-runner.js","sha256":"09bfc652321d5a7f0b10c00fa16f1255b96d79f6cf77138db65e73a61c9afb66","size":1042}
++{"mode":420,"path":"backend/scripts/baseer-runner-cleanup.js","sha256":"3070146309e7215dc7bde5e9b1d0803063bd9423c198ba0e74fd126f4936e40f","size":229}
++{"mode":420,"path":"backend/scripts/baseer-worker.js","sha256":"b06e119ac2a143e743b9493df4c236d181662e74493d1240196af8bfb3a59921","size":1752}
++{"mode":420,"path":"backend/scripts/create-shared-drive.js","sha256":"0b7ed5a1fa1923cb26b0fc92d0b4ab3dbf27b6009dc8d6cdc0aefb410670310f","size":2832}
++{"mode":420,"path":"backend/scripts/fix-cv-permissions.js","sha256":"795de9fd6b0a45230f52bb49f6bae0822cfaf396a12d1c36269b0bdadf2f6f8e","size":4969}
++{"mode":384,"path":"backend/scripts/hr_employee_import_cleaned.xlsx","sha256":"7624964a96260ceaad43d0cecf190c34de0a3f6e07bb8878666d5c6577c86572","size":16034}
++{"mode":420,"path":"backend/scripts/importEmployeesFromExcel.js","sha256":"b17ccb800b7cd0063f3ee3c56bf290eb0438c34fe46091dbe812d5ceffd9c2a7","size":15153}
++{"mode":420,"path":"backend/scripts/migrate-cvs-to-drive.js","sha256":"95a866f7964d8aa813854ab159b5e63a1fdba01636c078fe98457ec8696b1144","size":6091}
++{"mode":493,"path":"backend/scripts/repair-payroll-schema.js","sha256":"dd7f93f19a8b3e336cc060b010d411064292236326ff67e5d1bd99e735101804","size":4134}
++{"mode":420,"path":"backend/scripts/resend-tos-final-decision-callbacks.js","sha256":"8f83c2c478d801f7311b50c84b6de69c1c0c5f51c320ff44fbeb7e72916a02b0","size":5093}
++{"mode":420,"path":"backend/scripts/resetReservedSuperAdmin.js","sha256":"231726772c69ce2096c88c56b272d18764e499fc646a25bd63dc8ba96686e345","size":2653}
++{"mode":420,"path":"backend/scripts/seed-baseer-v1r18-permissions.js","sha256":"1ed9a8d661849bb8af6b61f305e1584ca59a9cdcbfe5d5bba313813bce2a3682","size":834}
++{"mode":420,"path":"backend/scripts/seed-permissions2.js","sha256":"c981e8dfde230c6d6244ca94c618df8863ea824d905e77ce8394df4a4f1fe78e","size":3820}
++{"mode":420,"path":"backend/scripts/seed-tscore-templates.js","sha256":"e3db052053754bd71848409d66cee9ac6a4d9a4488fc93473d760b1f7f38483f","size":5928}
++{"mode":420,"path":"backend/scripts/seed-workflows.js","sha256":"187a6f6f7cc9aa693a6e1345bf6b7afc9354923ab874b532fa6cacf12ef15da8","size":3096}
++{"mode":420,"path":"backend/scripts/seed_all_missing.js","sha256":"0cf6f8354ad9ba1e6741e846386c087e7508ca2d0c2824b44ea8653ef1ebddbc","size":13334}
++{"mode":420,"path":"backend/scripts/seed_employee_data.js","sha256":"9585a7929f2241a1cc191116e50162a07354bfdb31115640cd40ef1d24f20bcc","size":7829}
++{"mode":420,"path":"backend/scripts/seed_employee_profiles.js","sha256":"9d47463ef2edec1da08481c27e80a8195c771da9f8d770b965f3d8b028126840","size":6407}
++{"mode":420,"path":"backend/scripts/seed_goals.js","sha256":"23e518c687e7182f6f6a294d4aca9cbafc9617e5029d59492eb81d28e2ab981d","size":2062}
++{"mode":420,"path":"backend/scripts/seed_help2.js","sha256":"984f437ce8f08300ac976108d61a793e426998b7be9a9707b7c339bd2357c299","size":11945}
++{"mode":420,"path":"backend/scripts/seed_recognition.js","sha256":"8aad9a252826bc698d01a0b5a5b58892f728eeb2610b344c1a0ba8764e6d3600","size":2267}
++{"mode":420,"path":"backend/scripts/seed_remaining.js","sha256":"100c840b4e5c49214cfba960374f5463988bfc1b0a1228173f31eae974acbdc4","size":4578}
++{"mode":420,"path":"backend/scripts/sheets-config.json","sha256":"e239d82a3d3f3064218039557a792fceb2c72ebd52599a697246b32157d41b73","size":145}
++{"mode":420,"path":"backend/scripts/sync-data-to-sheets.js","sha256":"f705b5c49b28fd4a32c89f8830ebc5e7eff738bba280d44703aee9f7557ae702","size":10308}
++{"mode":420,"path":"backend/scripts/test-drive.js","sha256":"e3efc33471ff3610848c67e5dbcafddaa28834e3b35c38a71e86176503d15538","size":2892}
++{"mode":420,"path":"backend/scripts/test-oauth-upload.js","sha256":"e3e93e37a16f57a8e2de87d5bc6afe89f12f29642c1ae867ef6bf1a4b68c25dc","size":3400}
++{"mode":420,"path":"backend/scripts/test-upload-fix.js","sha256":"40cbfd5dff980d7502307379afc3c9aec2731c173037228ed3bbf96fee8bcdee","size":4882}
++{"mode":420,"path":"backend/scripts/thrs-import-central-id.js","sha256":"d2191b60e0760c089802e2f2fc0399ea31d9aaaf5a2b03ea87021358fd7bac4d","size":7334}
++{"mode":420,"path":"backend/scripts/v5-postgres-test-utils.js","sha256":"b127cddde4ba9a48c360814b951f8398314dc28b04866c15510f4485f7348e23","size":3342}
++{"mode":420,"path":"backend/scripts/verify-baseer-v1r16-permissions-readonly.js","sha256":"68bca07d87ac9b0d9add874a7fb03622ad636ac38ae742dd6b98037a8f60d187","size":1192}
++{"mode":420,"path":"backend/scripts/verify-baseer-v1r18-postgres.js","sha256":"1ab6a72e9b9e35a06df8bf1c93a375419c876f39252418b05a274f2619d4b3fb","size":1327}
++{"mode":420,"path":"backend/scripts/verify-baseer-v1r18-schema.js","sha256":"7d523570aa91a033bc682bdde28492b2ea968b02c835f9c920b9abb3c861fdbf","size":1419}
++{"mode":420,"path":"backend/scripts/verify-baseer-v1r19-schema.js","sha256":"7205af5ffd6536f8928612db7a947a1e13abf56c318713806cff29bdc71b267b","size":1527}
++{"mode":420,"path":"backend/scripts/verify-baseer-v1r20-postgres.js","sha256":"eeaef71ea872d4f96a3fb0460bcb65c36be5a77a54dcfc9871b30409a7dfac4c","size":1007}
++{"mode":420,"path":"backend/scripts/verify-baseer-v1r20-schema.js","sha256":"3d45d39bcfd40b2803ec66ee7b5e0c234df2b63b8c141f88d1af43a39cdf4b57","size":984}
++{"mode":420,"path":"backend/scripts/verify-baseer-v1r21-schema.js","sha256":"d337a552330f88b4a5b415bfb57a626bf0fc043cda642096766002064db91ce7","size":730}
++{"mode":420,"path":"backend/scripts/verify-baseer-v1r22-schema.js","sha256":"83139ebcfc8097e33bb15da75223eef42b145c6ddd99c64e71edd969333ff654","size":970}
++{"mode":420,"path":"backend/scripts/verify-baseer-worker-live-v1r22.js","sha256":"3b6c10de3a258523cf525f83e1ba43cf35e7c8ac0feae07a79d6c41605087cab","size":1472}
++{"mode":420,"path":"backend/scripts/verify-v5-api-postgres.js","sha256":"2f57087e33cfb8cdb1581067c30a52aacad3e3a27042d712deac530f08d67ef0","size":8009}
++{"mode":420,"path":"backend/scripts/verify-v5-postgres.js","sha256":"40daa2d0b8c36c682fa54dc81c12c2a063655f0e0a961a0a10eb7d7a059c6cc0","size":10227}
++{"mode":420,"path":"backend/seed_office.js","sha256":"e5dd3abe3be4252da44625a674c0b6f0e39cad69b81f006968db9c3de8c624ad","size":775}
++{"mode":420,"path":"backend/seed_settings.sql","sha256":"1b1d2796ca6af384d6f68ff3564b5ce6fff914250a36ed8c234fb308996ecbfe","size":934}
++{"mode":420,"path":"backend/seed_superadmin.js","sha256":"70aa016b03bfc5f41511f7472506137939b1e82c5c40a22a6fa16024dbe69802","size":1908}
++{"mode":420,"path":"backend/server.js","sha256":"ec35fe2dfe2e3d0ba21e54e791bedf8d99d9dc0c895a8c6997c6594cb8c43936","size":2456}
++{"mode":420,"path":"backend/src/app.js","sha256":"3e6d88ff2748c5b610e7382ace05c73c36b0a260f1d28629936466b431244bfc","size":6584}
++{"mode":420,"path":"backend/src/config/cors.js","sha256":"c3cebecc6ef835c3bde8fc65217c0cd54786321f4efecc561dc799ef741510d7","size":325}
++{"mode":420,"path":"backend/src/config/database.js","sha256":"becc24dcad2b9ce067a4a7b70d0374d7172574cd3b45cdef15a801d45b37498f","size":430}
++{"mode":420,"path":"backend/src/config/email.js","sha256":"27b4dae372696b4d046b8a516ef6b1b51634ed05e35f66eee826cb37ac470039","size":527}
++{"mode":420,"path":"backend/src/config/upload.js","sha256":"4df8250ebc81d1ad4435f11a1b6b60abdfdf3a2b4083687080f4fcbff913637c","size":1865}
++{"mode":420,"path":"backend/src/controllers/adminAgent.controller.js","sha256":"b99006433823aa8c77cb7bdd4be4df9bc885595f45760e0defa1f37ce0e9f89e","size":4690}
++{"mode":420,"path":"backend/src/controllers/announcement.controller.js","sha256":"e6a8ba2a95ffa33550154d1157503941a9e495ad089eef717059eaf251049f34","size":7016}
++{"mode":420,"path":"backend/src/controllers/approval.controller.js","sha256":"facb846a0c52f286b9efffd4121c0dd4cd6ae50bcd5d2a78f95ce9d2831b13b9","size":2814}
++{"mode":420,"path":"backend/src/controllers/attendance-calendar.controller.js","sha256":"7bff33553bc1312d3d3f7be21c32a45220934f68a41c196037539752520221f8","size":1194}
++{"mode":420,"path":"backend/src/controllers/attendance-import.controller.js","sha256":"7da04ce28602e40f488be5cee0525c90474d872b0da88b883cd634d352a2a1af","size":3310}
++{"mode":420,"path":"backend/src/controllers/attendance.controller.js","sha256":"84cb94a72bcb11462cb50f349267a1a0a4ad028368e1201034ee29d6e56af9e0","size":31593}
++{"mode":420,"path":"backend/src/controllers/auth.controller.js","sha256":"2ab326c648bb4a30fdcde9d6c8d0847db79cf55e8d1f95075cdd715e5c04fe0d","size":6791}
++{"mode":420,"path":"backend/src/controllers/baseer-internal.controller.js","sha256":"938461eef397206fb161c74e9574940450b21adb4a550226b9efe3717ee764e6","size":1492}
++{"mode":420,"path":"backend/src/controllers/baseer-onboarding-legacy.controller.js","sha256":"2a814476da5295fcd34ba8e1beb814df5b7cee09f251afea52bdea209057fcf5","size":2908}
++{"mode":420,"path":"backend/src/controllers/baseer-public.controller.js","sha256":"6dd1e1c8af90a4f0faf7958048077c022b2ab7d85323c856d8f381e424a09dc8","size":3059}
++{"mode":420,"path":"backend/src/controllers/baseer.controller.js","sha256":"e67662f4cb1d18888b55764266b9fe60be99d3ef1f98e71d8c2279ce03acf22b","size":5007}
++{"mode":420,"path":"backend/src/controllers/benefit.controller.js","sha256":"11943492bd8ece61c4d6dc0b5aad3b0ab0eeed2e7528338fefd29601bcc1cab8","size":7381}
++{"mode":420,"path":"backend/src/controllers/dashboard.controller.js","sha256":"fd4af9cec56b5c1f423240fd2f3c75b98c70307b1cefd167cd41ed6de6051120","size":13855}
++{"mode":420,"path":"backend/src/controllers/developerHub.controller.js","sha256":"bb7d7ba42f116c292355b5aba504b043972f8c8187b840882c97483cd0ddfba3","size":20161}
++{"mode":420,"path":"backend/src/controllers/document.controller.js","sha256":"90bef78da8d30bef540064ce08e7a65001e55db1ebdc6f19fce5076110f53a32","size":12175}
++{"mode":420,"path":"backend/src/controllers/employee.controller.js","sha256":"6fbb4657dfcbdcac8cc3bbdcd49b5ea5ccafa331cca07f850e8cb8b2578f9a57","size":32051}
++{"mode":420,"path":"backend/src/controllers/exit.controller.js","sha256":"7e8e99f4bbc5106217717510fd4739c32524f843f6ed214e3396da974edd24d4","size":5107}
++{"mode":420,"path":"backend/src/controllers/feedback.controller.js","sha256":"1fc5a50af89085f8bb890d6d3746587c018621f5e0ff1f8c2f9005524bc01de0","size":22312}
++{"mode":420,"path":"backend/src/controllers/goals.controller.js","sha256":"403b3bf574360268ad722569615fb42dc98d8dbefa3d9b14d5f198986628759a","size":8931}
++{"mode":420,"path":"backend/src/controllers/help.controller.js","sha256":"efe3a772c5effba43de6eb0f7d40405b1b95559cedc26ed443eab0cc9b72bf46","size":17375}
++{"mode":420,"path":"backend/src/controllers/integration.controller.js","sha256":"2ec0ca7707788ebd501a6d4f3c5debad63ccf5948ee43d587fd160c0211ee5da","size":4976}
++{"mode":420,"path":"backend/src/controllers/internship.controller.js","sha256":"9e928394c1b02d5740d3affbf095a4ee51ca26bd4158a0d3a2997cd4fd8a16e0","size":4630}
++{"mode":420,"path":"backend/src/controllers/leave.controller.js","sha256":"f2a5465c6046c3d2c61773ee052ebb0082505f28d8c025dd5f6cc546b178eb30","size":37482}
++{"mode":420,"path":"backend/src/controllers/notification.controller.js","sha256":"1405a01ee2fb991c8fc5d75bbd0a2feccb8f32cd4f83e764a52d44c4df2b9d59","size":4781}
++{"mode":420,"path":"backend/src/controllers/office-location.controller.js","sha256":"a6de713c60d61b694bc7847f042e1e4bfa4414b0ebea6895cc8c0b35ce9dceb8","size":3859}
++{"mode":420,"path":"backend/src/controllers/onboarding.controller.js","sha256":"1969c7a994ad1a8ac443edb9a2b356e6068637fe95d0527c5055c361b9d67b86","size":3462}
++{"mode":420,"path":"backend/src/controllers/org-chart.controller.js","sha256":"3d128ac073b8a54ed8c1f912519f8fd4740148a1c27f58f65b84c6245781e121","size":2404}
++{"mode":420,"path":"backend/src/controllers/overtime.controller.js","sha256":"f3979b42f1356f97c107434541501a6a0e59db4ea9fd886a8e4d73cdf0dbbe04","size":5839}
++{"mode":420,"path":"backend/src/controllers/payroll.controller.js","sha256":"67f5ff4efaadac1debb076fde5b6dd950c15c30722d85186633fb11322226df5","size":61980}
++{"mode":420,"path":"backend/src/controllers/performance.controller.js","sha256":"a23c353ac208570ad1354996b7f5b4a63108401489e28e5a6331e08d43a7c865","size":3189}
++{"mode":420,"path":"backend/src/controllers/recognition.controller.js","sha256":"fa150ee0a9e612e454f412c903f025ed36b8124dc6b7df9584a4c316bc791502","size":5576}
++{"mode":420,"path":"backend/src/controllers/recruitment.controller.js","sha256":"9f9c0495f40902a546faa6478864f00cdec4f9e56d5846eae8e682b8cbd4ffa4","size":21250}
++{"mode":420,"path":"backend/src/controllers/report.controller.js","sha256":"66f774b2b067741d5ee2db5fe006a83c2c2494d5ea71051556b52b4d3298d731","size":36418}
++{"mode":420,"path":"backend/src/controllers/reports.controller.js","sha256":"78ea1c76b88a4febecb0380db699d7760dd3bdd35ee0df918544ad6830633dba","size":12395}
++{"mode":420,"path":"backend/src/controllers/reports_additions.js","sha256":"b9bb3547316b59b675d0a886c7f1a767f064b269b29249098169ed1720813a3a","size":18514}
++{"mode":420,"path":"backend/src/controllers/salary-adjustment.controller.js","sha256":"7dd1f905b2a18854ac625c46f2f0281be9b3cbbf4b8b7ae4f509772593eee885","size":4556}
++{"mode":420,"path":"backend/src/controllers/settings.controller.js","sha256":"2c2a45c7c8699740529b2093a3817368569513ca7a867cfbe1dcc2cfb60c977a","size":15508}
++{"mode":420,"path":"backend/src/controllers/shift.controller.js","sha256":"3be3f452098a707a7ff6179e268f27a12935d3dd306b4df93c3ba39a4816e874","size":24269}
++{"mode":420,"path":"backend/src/controllers/skills.controller.js","sha256":"2d74e65702d08a1a28ef288df6b98fdcc36c3a414e6f81f8e1f9582ebf42c864","size":7933}
++{"mode":420,"path":"backend/src/controllers/support.controller.js","sha256":"f0fae2b2b854363b5138105fe76dfdabc4f0fe1c436b3dfa4b30ba85fe22a552","size":18111}
++{"mode":420,"path":"backend/src/controllers/survey.controller.js","sha256":"85347d675c8d523a397fc7c40d653db978fdd110a487e76ed2250d7ea90d3430","size":14219}
++{"mode":420,"path":"backend/src/controllers/tos-request.controller.js","sha256":"cf14f99974a6cab7156d5bf2a0a9a545f3122ddfe19415909defa2bd5e6eade9","size":10347}
++{"mode":420,"path":"backend/src/controllers/training.controller.js","sha256":"26ebbaad35d0c621abc959b4d8ba9248f82d7b2c90af41849dc35f17cadec013","size":6707}
++{"mode":420,"path":"backend/src/controllers/tscore-analytics.controller.js","sha256":"e3cae69916a49cf600f591adc30eb169cd98bc6c7e70c34738c02f26556c5a64","size":4433}
++{"mode":420,"path":"backend/src/controllers/tscore-evaluation.controller.js","sha256":"5fa773aa6be36c590821eb10f71cd84a729b4ef9305f1a0b8aed1826619059b4","size":14097}
++{"mode":420,"path":"backend/src/controllers/tscore-template.controller.js","sha256":"7c8cf943099a20065f0e746027d5a32198df974f1092da589f430b688e189141","size":7808}
++{"mode":493,"path":"backend/src/controllers/work-schedule.controller.js","sha256":"b1b8d4d9ca77aca9f642026499a49807831e65669a287960cdc159f0262d67ad","size":46826}
++{"mode":420,"path":"backend/src/middleware/api-i18n.middleware.js","sha256":"931e81eacd36eba9f95050ee1235c8029565a89c22e3e4bd1e1ca9dd65e9e2e2","size":400}
++{"mode":420,"path":"backend/src/middleware/async.middleware.js","sha256":"7162436a4d5bb99820d716112be0dea85155934245c5c89a46409ca2737b8325","size":171}
++{"mode":420,"path":"backend/src/middleware/auth.middleware.js","sha256":"31c85a18ffd97977789fc4268d4abbe9a218867f79e635ad0eac799f4e5591d0","size":2154}
++{"mode":420,"path":"backend/src/middleware/baseer-enabled.middleware.js","sha256":"afe6f456da63acf7ead98579b2373914577f14ed0521e0ca65edf1145165b83a","size":306}
++{"mode":420,"path":"backend/src/middleware/baseer-permission.middleware.js","sha256":"d9e3d7fbdc22ee57d8dacb4b9c70f81c23332d79485cc846b4de5d0761d50b93","size":713}
++{"mode":420,"path":"backend/src/middleware/drive-upload.middleware.js","sha256":"1aa87f99ea16431ec09b7084a9df8332c5c84eb8f3930eb193b3773711e5e761","size":2583}
++{"mode":420,"path":"backend/src/middleware/error.middleware.js","sha256":"adc3ad05a027de30ea7e84e6500d3d0cc9bc0dcfb836837f527c5e88db578750","size":2620}
++{"mode":420,"path":"backend/src/middleware/no-cache.middleware.js","sha256":"33270203a6b7e5a6c4cc489b296703301952a69e4a33aadb40ee4f1fc896c787","size":646}
++{"mode":420,"path":"backend/src/middleware/role.middleware.js","sha256":"85d57f582e5dac336fc1e0a9cf3a45278afe0a678f060348809720700186d9b4","size":3428}
++{"mode":420,"path":"backend/src/middleware/support-upload.middleware.js","sha256":"51a76c260f1dcd9d2c56cf8e3fcec7cd7734b3791c248395e1eb7ed637d692ef","size":474}
++{"mode":420,"path":"backend/src/middleware/upload.middleware.js","sha256":"c14e919ff978f60aba71ccb6214a3bd60a57434683e96cb6b204ed9d6c7dd44f","size":585}
++{"mode":420,"path":"backend/src/middleware/validation.middleware.js","sha256":"2f6211080267a928f8f44c3e26acbbe219ca097048c7c978c1f314b674be960c","size":2434}
++{"mode":420,"path":"backend/src/routes/_helpers.js","sha256":"ca171d33a506d8533dbd577277a6cbf1cd661b696cd00bfb0fbd21cd93129bc8","size":1545}
++{"mode":420,"path":"backend/src/routes/adminAgent.routes.js","sha256":"941dc01d204a7dafe5da1c04637fae394fd87188e5ce265d10b9e1f6a0b7df9f","size":1181}
++{"mode":420,"path":"backend/src/routes/announcement.routes.js","sha256":"eed54849c9387b9771995774ec10e4cf2fa85890529830e7006deafbe2ab7af6","size":729}
++{"mode":420,"path":"backend/src/routes/approval.routes.js","sha256":"b7fdd0142a5f189f67cb5bb50242d6397214706d1657ab1b75330378d7022da6","size":701}
++{"mode":420,"path":"backend/src/routes/attendance-calendar.routes.js","sha256":"13e6a010c930950ba2322328c4b7100c4acfc514b476bc5b224c322659b9160d","size":637}
++{"mode":420,"path":"backend/src/routes/attendance-import.routes.js","sha256":"fd85597e9fa8dfe09ba7b2d029d80a73490f5b445a715681c82a8aa98187ce8b","size":1171}
++{"mode":420,"path":"backend/src/routes/attendance.routes.js","sha256":"67a6b00fe83a607088c26a5328b1ca094f6d3da362e53ca2662c5858e136ff0b","size":1244}
++{"mode":420,"path":"backend/src/routes/auth.routes.js","sha256":"e8144a36989922f6007231ec4ee1256969612458d7ad2e98f610a23ed8894c00","size":774}
++{"mode":420,"path":"backend/src/routes/baseer-internal.routes.js","sha256":"d61434a23a5085bc792df6e81d5b4aa3cb1059ffe6ecb2fe6d4ce3587a4134a9","size":517}
++{"mode":420,"path":"backend/src/routes/baseer-public.routes.js","sha256":"6a50fd8aa17d60bffee092cafc7a16f4361d484469a879ca22b577c542a8f16e","size":760}
++{"mode":420,"path":"backend/src/routes/baseer.routes.js","sha256":"73efd8019d89fe961ac53feb4aa1f0e5527455dfc6c4abf42036b8b50617b87b","size":883}
++{"mode":420,"path":"backend/src/routes/benefit.routes.js","sha256":"187f966eace6503559009e4dde9a495f23d62a23efe890b813b57e4a0c44faa7","size":1327}
++{"mode":420,"path":"backend/src/routes/calendar_endpoints.js","sha256":"f01fcafab73d47227d7a12de6ce72e09464455b71ff7b7eb3f1dd2ff4a9b9d46","size":4697}
++{"mode":420,"path":"backend/src/routes/dashboard.routes.js","sha256":"31f951ad1e58bc85669664872051921cc6a585cf427e3b99d0304932c36ccdd1","size":305}
++{"mode":420,"path":"backend/src/routes/developerHub.routes.js","sha256":"dfebe0337a07a9285ea27b8a07b292217cf725110d4d542f6486281db146d55b","size":883}
++{"mode":420,"path":"backend/src/routes/document.routes.js","sha256":"a6d5f288228b826c987734a948b7d59c2666ee73a1cd0669adc7adabbe085f1c","size":808}
++{"mode":420,"path":"backend/src/routes/employee.routes.js","sha256":"6dcc3ce2b351cf244f6434a31e642ee805bf208fd90f6263ad518e2b534b9b03","size":1776}
++{"mode":420,"path":"backend/src/routes/exit.routes.js","sha256":"45b38faf3ebc3763cd16a71aa97525a2cfc92139b45ec13a80259459d2dffc5e","size":1313}
++{"mode":420,"path":"backend/src/routes/feedback.routes.js","sha256":"95e76c9d735f9b65021bf3d94d21e51788863020e6b3d23ee7d76d54102799e0","size":823}
++{"mode":420,"path":"backend/src/routes/goals.routes.js","sha256":"4971b57a0724bbdba6cd27904026f585a1189f5b19785121fef358210167edfb","size":569}
++{"mode":420,"path":"backend/src/routes/google-drive.routes.js","sha256":"c09aab72cd75464c31f39afb06b790c0ef13a5b86636d946aec2e924623b35b2","size":1848}
++{"mode":420,"path":"backend/src/routes/help.routes.js","sha256":"56d2dcacb0c020b6e14bfaa6d23b80b46f517b64e67b1593a2cdeabfcd916e0b","size":894}
++{"mode":420,"path":"backend/src/routes/integration.routes.js","sha256":"c1a3f138466e48215c9af9cc69517409ea82fcdaf374ab7e89471b85d7a032a4","size":855}
++{"mode":420,"path":"backend/src/routes/internship.routes.js","sha256":"8103e14169ca5f0f100f8a98fdb1b0b108024eb9a90675d0477af34b019f9840","size":905}
++{"mode":420,"path":"backend/src/routes/leave.routes.js","sha256":"ee83624e6b32ed79723295cca702c8c4cbd9a27d1d20fdb8205818a3eb6ccac3","size":1749}
++{"mode":420,"path":"backend/src/routes/notification.routes.js","sha256":"658edd8ef35c80589589ceadcf2a86b6f3d8bd35c326218cd25d26d85971d988","size":831}
++{"mode":420,"path":"backend/src/routes/office-location.routes.js","sha256":"72a2795521e9d2ed735be584fa639b8190e6e6c252d7e15e4253f20b1b0d3830","size":837}
++{"mode":420,"path":"backend/src/routes/onboarding.routes.js","sha256":"d06966c58a83e3b729b0f9fcecc9b6cf1b1bdd0592bf4126e71b663e47c41fd2","size":3209}
++{"mode":420,"path":"backend/src/routes/overtime.routes.js","sha256":"c419077302939de4293732828aefb9b1198de8e0e8a376b214a39cac557dce96","size":872}
++{"mode":420,"path":"backend/src/routes/payroll.routes.js","sha256":"a9b0dfaea102932960ad97d2bd6d514269d0dd352ade2cff802dcb13603160de","size":2361}
++{"mode":420,"path":"backend/src/routes/performance.routes.js","sha256":"a1213106c5845c4ba949a60133de8f29d7b021fe1deda5d43e7950cd07edf351","size":723}
++{"mode":420,"path":"backend/src/routes/phase5.mount.js","sha256":"c7b04ec01097057d283f6fbec28a800cc5d14466b4fee9b1caf8b5a3662aa05e","size":473}
++{"mode":420,"path":"backend/src/routes/rakan-chat.route.js","sha256":"97375e5d6948e0ab88c64a3b37cb0685b2e267242fbbab7093744eaf0ecf53db","size":10362}
++{"mode":420,"path":"backend/src/routes/recognition.routes.js","sha256":"d55dadc803800febf6f5fb1aad0a92f8f2ba5b3c05a71154e958d91070f665a3","size":433}
++{"mode":420,"path":"backend/src/routes/recruitment.routes.js","sha256":"1592dc9a342ac2d11f45c193e42b3fa86ef893f5640764548b4c6551bf50f967","size":1989}
++{"mode":420,"path":"backend/src/routes/reports.routes.js","sha256":"702d271210dd7b8d29f649ed64b5107874c6c9bd3857f67ebb3d31c55ff4de08","size":1865}
++{"mode":420,"path":"backend/src/routes/salary-adjustment.routes.js","sha256":"6299d393c05b3adbdea9c3fb6c43d1d2c3fbdb29b0351454ec1e15ed3bfee841","size":454}
++{"mode":420,"path":"backend/src/routes/settings.routes.js","sha256":"bf29fb3a41c90f2df91587ca5e11e3fc7226c3d1abe5084d29ea08ca63639501","size":2998}
++{"mode":420,"path":"backend/src/routes/shift.routes.js","sha256":"e5dbc697f1cb4376cc31db4bbd98586a7dbd2fdfbce0a66dd7a2ce6fcca0f5fe","size":1224}
++{"mode":420,"path":"backend/src/routes/skills.routes.js","sha256":"4af674c0a903061ea630dfe9d72809bbfbc84f121cd5b43b204f3533133f50d0","size":573}
++{"mode":420,"path":"backend/src/routes/support.routes.js","sha256":"59535b6e934d55e86520d00179bb325254881a7d698a382ad62d3d47a95474e4","size":1023}
++{"mode":420,"path":"backend/src/routes/survey.routes.js","sha256":"0824d20b9a10ddf0dba6f1122cabf3ca7a9ba45dc0ab0666b0a590c14c3ee9a3","size":1397}
++{"mode":420,"path":"backend/src/routes/tos-chat.routes.js","sha256":"f4120f7da98ad9edccb6d99f37886adf8fcc16d244914d67b248b4144dd4320c","size":4925}
++{"mode":420,"path":"backend/src/routes/tos-request.routes.js","sha256":"0f032deecf18b975390e975b7ddb70b2c01f6f12be463aa919fb6f9c395335f8","size":506}
++{"mode":420,"path":"backend/src/routes/training.routes.js","sha256":"891f27801d101d3b81e18c3b1417fbfeaf23e09ece28551200e45c388aca3ce1","size":794}
++{"mode":420,"path":"backend/src/routes/tscore.routes.js","sha256":"14b1210fa1bea1c609c7e52520be0e8797fa19c1dd486b405168c182ec0ad277","size":2876}
++{"mode":420,"path":"backend/src/routes/website-apply.route.js","sha256":"d7413fd607e1a162ca24860d0dd1524d62706edbdb81888428432af547a7d85b","size":11750}
++{"mode":493,"path":"backend/src/routes/work-schedule.routes.js","sha256":"24707069a29e4f8209a8e1c9199ec28f99852349885448d36f952b1fa613a975","size":2147}
++{"mode":420,"path":"backend/src/services/admin-agent.service.js","sha256":"4ca4a682cffe4faee6302128fc25e670ccb346f06a3455949104aef2bce785b2","size":50938}
++{"mode":420,"path":"backend/src/services/admin-agent/providers.js","sha256":"f6fc9c1cc5cd11dab5b1e6bb1dcd427e8140d79f55e617123ea901c5244febed","size":4698}
++{"mode":420,"path":"backend/src/services/approval.service.js","sha256":"f4a63a7371ade8dd6abc505397daed7edde1e69cc84131369f150c8d307e993a","size":18056}
++{"mode":420,"path":"backend/src/services/attendance-calendar.service.js","sha256":"515251f97c74baac86906486720bda403faee4a9a7b0f36647e16a1371922996","size":15427}
++{"mode":420,"path":"backend/src/services/attendance-import.service.js","sha256":"22f786ee80c08215cdf27926763e3b5bd36fbb75cbe0ac6f76aacebc6fb1d233","size":40330}
++{"mode":493,"path":"backend/src/services/attendance-settings.service.js","sha256":"576a9e7b55633524b160f441e11bbd6f058ed0bf53725bbe810ba8486a50c675","size":7775}
++{"mode":420,"path":"backend/src/services/baseer/action.service.js","sha256":"058416637d987dd747ce3407af616621bae8f77bfaadfaf86aff321ee75dbb64","size":4278}
++{"mode":420,"path":"backend/src/services/baseer/ai-planner.service.js","sha256":"cfc21c38b86ea6dd94f433f1650dd11c984dd531b7d7d2fd6cdcef5505e2bb0b","size":2572}
++{"mode":420,"path":"backend/src/services/baseer/ai-provider.service.js","sha256":"b4367277287b334f51358bb813603cc38c2cd51d46f460e0e2b5675148d4c8d2","size":8076}
++{"mode":420,"path":"backend/src/services/baseer/cooperative-timeout.js","sha256":"608daec843b337575ab3db3309f1bba2a214abcf514a035f77c522ae1f4d0201","size":1179}
++{"mode":420,"path":"backend/src/services/baseer/crypto.js","sha256":"2a5453e1a4f10eca52a9351d32c4e63c43b5fe095e4268c153b285d7fbc2155d","size":817}
++{"mode":420,"path":"backend/src/services/baseer/errors.js","sha256":"c93643280b4dd5a1c4405e885002b75f1652a0f9984f047e2534591a7e97d899","size":559}
++{"mode":420,"path":"backend/src/services/baseer/execution.service.js","sha256":"9214ad273c5173ac643756d888a5b43a1c91fe4ff88497dbad8414fb280d995e","size":3378}
++{"mode":420,"path":"backend/src/services/baseer/executive.service.js","sha256":"ff470712ad730fe75c6dabe9cd8497e9b7c07677cae694a6bfd2c0c6a9de5560","size":1158}
++{"mode":420,"path":"backend/src/services/baseer/feature-state.service.js","sha256":"2d8c4228ca0e739e34532cd2a2cf8a1dc0838a0d6cc40d198b6565ebf81c4bed","size":356}
++{"mode":420,"path":"backend/src/services/baseer/job-retry-policy.js","sha256":"1bfb172d9ea8545a0c66fd49db92cd6f9a4737bf23048d4481701fa5160e45fd","size":393}
++{"mode":420,"path":"backend/src/services/baseer/jobs.service.js","sha256":"b8f6c45bd9ed36c494a67abe2702817a4887c7f1963d3b105aaf9f7f78df7599","size":9262}
++{"mode":420,"path":"backend/src/services/baseer/knowledge.service.js","sha256":"4726c0b4549f059e17737d790d53cbfd0878ec771e171a3e84a3881c8273c20e","size":8883}
++{"mode":420,"path":"backend/src/services/baseer/livekit-token.service.js","sha256":"8d2f6691ec93f225b328488073d852459fa5f9ebd49a13c8bbef277a05fe8ba1","size":2716}
++{"mode":420,"path":"backend/src/services/baseer/onboarding-assignee-policy.js","sha256":"f0d1b1a2cd35fe6dc2584f4a6b839f1afbd070d8c1dc34b631cd4150ae9053f0","size":1186}
++{"mode":420,"path":"backend/src/services/baseer/onboarding-logic.js","sha256":"57a8230563adbffaf10527cc96f2fb76921597aec540b2018413247842958568","size":1958}
++{"mode":420,"path":"backend/src/services/baseer/onboarding.service.js","sha256":"7b241e1d3f38c5871225f78981140f55a840d84ae3f168dae812056c9db9a4bc","size":27246}
++{"mode":420,"path":"backend/src/services/baseer/orchestrator.js","sha256":"fbd1207afaafb0bae2f4fa8b46d7995e263a16e267f8ebfb6cdd743d0aea162c","size":4341}
++{"mode":420,"path":"backend/src/services/baseer/permissions.js","sha256":"ff9484ab0b5124f7278cff2bc3b69ba5674e0d97b83a3c23a77d5bd0fa58ea36","size":3660}
++{"mode":420,"path":"backend/src/services/baseer/rate-limit.js","sha256":"c37efecdcaa6474876f710f848994ea4071bf47ce9cb0f2d92ac8fea9d09f52b","size":3657}
++{"mode":420,"path":"backend/src/services/baseer/recruitment.service.js","sha256":"a654fe2ced8e7a15d2103cb58fcdc744b5388948bc0db67f399de7083cfc56b4","size":17550}
++{"mode":420,"path":"backend/src/services/baseer/reminder.service.js","sha256":"17c19345381f43e31de009a31bde6e0eb5d9d5123e2ba4b5491896f73457368b","size":2846}
++{"mode":420,"path":"backend/src/services/baseer/scope.js","sha256":"77e43a48727aa9231518023bd1b5011010af13ef3f97862d8e3434d4907aa9cd","size":3179}
++{"mode":420,"path":"backend/src/services/baseer/security-events.js","sha256":"04ae690f33e7e66fe699b9a866a095106052b0eff253cc53a56eed745f86d456","size":392}
++{"mode":420,"path":"backend/src/services/baseer/talent.service.js","sha256":"628a68894ec30b3f9c2ae9387419a6a4938b4cb85fbe638a8ae6ddd617004dab","size":2852}
++{"mode":420,"path":"backend/src/services/baseer/tool-registry.js","sha256":"5340a41ee3964c3b98f606b9634e7f327862071d3c15cd01d7f0ed8496cc2232","size":1102}
++{"mode":420,"path":"backend/src/services/baseer/tools.js","sha256":"af02a12f050eabb1718af5ee2aa0ec80bafc9e5cf613e19a4fc97216418ee3eb","size":4731}
++{"mode":420,"path":"backend/src/services/baseer/version.js","sha256":"47b80b3c4d7b220c14890659bcd4328b6d839f76a88bf3ff13b66ef28c39bdc1","size":203}
++{"mode":420,"path":"backend/src/services/baseer/voice-consent-policy.js","sha256":"0260f4d43508d596e36c8d57c21c38521884bfb65a9c2973bf2c9c707c7af927","size":977}
++{"mode":420,"path":"backend/src/services/baseer/voice-runtime-config.js","sha256":"e831c62bc9714ec96bfca5243004788019a6dae1f5f57be8eb2254345ba62245","size":556}
++{"mode":420,"path":"backend/src/services/baseer/voice.service.js","sha256":"e567cd4bb14c50900b08568c8b80050a195a7e08a395e59f7d5e6d04e1e01d16","size":14479}
++{"mode":420,"path":"backend/src/services/baseer/worker-isolation.js","sha256":"068e1d865449733f417a6666b8cbea9aee9ed20104321b57f7afbe54b62780f8","size":4247}
++{"mode":420,"path":"backend/src/services/email.service.js","sha256":"4550541694bff399d5596febb360c926ef9b277e9a1ec97107432de5f22ccd29","size":4774}
++{"mode":420,"path":"backend/src/services/export.service.js","sha256":"3c750e24e5e030eb6cac2cfbe2e40b5a36d8a900ea61f250b794d200fb4cd1b0","size":4443}
++{"mode":420,"path":"backend/src/services/gdrive.service.js","sha256":"27c67c43dcc2ed08f42beecb930aba07be9752254fb851ab0974b46e41f6c084","size":3278}
++{"mode":420,"path":"backend/src/services/googleDrive.service.js","sha256":"0e121e2d83f534c8db4fc8b89e325df24705ca77e1848c0cc981ba6c1fa6d08a","size":17829}
++{"mode":420,"path":"backend/src/services/gps.service.js","sha256":"3bdcb6bb781b6eeca0efcc2643176c498dc58705393f795751eabbf18a409696","size":6054}
++{"mode":420,"path":"backend/src/services/gsheets.service.js","sha256":"4d17d3dce9b94a286a15b2ead41ba27040ec8326ac156f53300aa4f7d2f1674e","size":2717}
++{"mode":420,"path":"backend/src/services/hr-maintenance.service.js","sha256":"aed9715f9e0790ad2f76009ff926df93351cff5fbaebb161fafab91957703f8f","size":1454}
++{"mode":420,"path":"backend/src/services/hrPayrollPolicy.service.js","sha256":"115c549b6368b60b94d1881006c43d9b7824517fca3841a3e797872ce9d4fc87","size":28433}
++{"mode":420,"path":"backend/src/services/integration.service.js","sha256":"0eb18955fefa887f92e3a857876e9580bb227fbc262258c8934036875bcfa750","size":1858}
++{"mode":420,"path":"backend/src/services/notification.service.js","sha256":"bde6cb9b2704424ba0dd9099634770890bd4efb53ba6f12dcac33c2ab9adace2","size":24402}
++{"mode":420,"path":"backend/src/services/pdf.service.js","sha256":"0c2bd1413e5ce4bb33bd13f02cf61a9fbcea6de5cbaf0e8001cab4fac4fc7a42","size":1912}
++{"mode":420,"path":"backend/src/services/recruitment-notification.service.js","sha256":"62f42b34d2e61c180c3911ef2957c04ef7c1e9b296d755c6b3c83b81fb1c8b8d","size":3044}
++{"mode":420,"path":"backend/src/services/salary-adjustment.service.js","sha256":"a37a952bbfc3ff352de1633099ee5407128fd4c60a60485ba8c28ed23142b4f4","size":3395}
++{"mode":420,"path":"backend/src/services/sourceArchive.service.js","sha256":"f92348619de626f69b6ecaa05b2a07830183654d483092b016f14de6be6be48c","size":9579}
++{"mode":420,"path":"backend/src/services/tosIntegrationCallback.service.js","sha256":"595f60ff4692e571d4a3b7d4e93af8afa2f8f2292b14f822f191443c837bc06a","size":6250}
++{"mode":420,"path":"backend/src/services/tosIntegrationSettings.service.js","sha256":"198650701a623e2605cb0b86956f70722b25b679f768bb5dd405ca257f65335a","size":7584}
++{"mode":420,"path":"backend/src/services/tosRequestCenter.service.js","sha256":"f1fa76a82a355ca672964359ae20626e9b386652980cec8d12e398cb786564be","size":2885}
++{"mode":420,"path":"backend/src/utils/constants.js","sha256":"f820f253f1968a4c4c6a0798005a415f1ffb2b10831f4bfa2f9ebf341847e13b","size":1624}
++{"mode":420,"path":"backend/src/utils/employee-attendance-history.js","sha256":"d3b0a2058308db6756bce49a1d7b7e9d8ee25bff99e6278021c610f3163c0ca5","size":6052}
++{"mode":420,"path":"backend/src/utils/helpers.js","sha256":"83cdc379aca92820d02c8cb96436c91f2492256dbe09a7bbd8bcc73cda1be218","size":1019}
++{"mode":420,"path":"backend/src/utils/i18n.js","sha256":"6c82de0051ee9aad342768cb2c9a53dd1383307233a2e9055d7268dbaf810202","size":16144}
++{"mode":420,"path":"backend/src/utils/logger.js","sha256":"7d6110c84e28227e0a0a0e6a186aecffdf4cfd5384c73b1589bd703dd0d480a3","size":566}
++{"mode":420,"path":"backend/src/utils/org-chart-access.js","sha256":"b9197d0b12f04b3612838cf2e40fb0dd2d0e5b3f7654e39b07c25c2eb97f3b7f","size":9130}
++{"mode":420,"path":"backend/src/utils/scopeFilter.js","sha256":"5b45789b60cb1a2f6b53571a77607330bc227d48b2146bba8e9860e22b61eb93","size":1326}
++{"mode":420,"path":"backend/src/utils/security.js","sha256":"4b456ae069317af45e86afdd5d936fee6748aad989c92a020eba5d65957c1dfc","size":1682}
++{"mode":420,"path":"backend/src/utils/structuredError.js","sha256":"705440c6ff78acf764a6c881db5672b6767394455dc5898fa3cefdb05a37de08","size":1100}
++{"mode":420,"path":"backend/src/utils/superAdmin.js","sha256":"98c68a85ac863704f090da39ed01c76780b91fdcb8cccb58bbfb3b8798358bdf","size":1493}
++{"mode":420,"path":"backend/src/utils/tscore.helpers.js","sha256":"24bb1fa78634a42be47adbdb583d84dfeae1406fb996c260df640599ac9fc56c","size":3532}
++{"mode":420,"path":"backend/test/baseer-v1r16-deploy-contract.test.js","sha256":"231eec90424d827f4bc79e5703c20174b493f5f27a70d5a7434d98f80c26504d","size":2618}
++{"mode":420,"path":"backend/test/baseer-v1r17-deploy-contract.test.js","sha256":"8f023824d7da65779a7826ec4bc6f798050bba13b16fe6b34660ed0859efe8af","size":3620}
++{"mode":420,"path":"backend/test/baseer-v1r18-contract.test.js","sha256":"e73d4c8daa13e0ded4da42dd629020c32fddbccfefea19675d78f36245dc53d6","size":4245}
++{"mode":420,"path":"backend/test/baseer-v1r18-deploy-contract.test.js","sha256":"bbf5e52bf8c06abaabcd7462d2100f3b2580848f68605742fc601fd75fc83122","size":2724}
++{"mode":420,"path":"backend/test/baseer-v1r18-migration.test.js","sha256":"9ea18054c6e84f5aca56094961f86563ab06016c4030d7e3e916a843a7b26c2a","size":892}
++{"mode":420,"path":"backend/test/baseer-v1r18-unit.test.js","sha256":"6fdb9b221e8307aaeb52b2124a7ac7271eac0199db0257593a774c80ce10704d","size":2667}
++{"mode":420,"path":"backend/test/baseer-v1r19-contract.test.js","sha256":"2529a2d3a855a25e7e6f999bd2b0450e85fc78075d0977c8423dd6e0442ecf37","size":8817}
++{"mode":420,"path":"backend/test/baseer-v1r19-deploy-e2e.test.js","sha256":"fd5b76638b4c9351c8162fa7828f0ffeb9e3ec614818f701909330c72c5d825f","size":7090}
++{"mode":420,"path":"backend/test/baseer-v1r19-migration.test.js","sha256":"96dab6c3858d7a88a25639fd864780b3fd1cc82708192a127a1669cc4bb4a04d","size":1729}
++{"mode":420,"path":"backend/test/baseer-v1r19-unit.test.js","sha256":"002b053efc1588a3db11f54bc88bda1bf8cc8aa27cba3d0133aa027d6e821bcd","size":6222}
++{"mode":420,"path":"backend/test/baseer-v1r20-contract.test.js","sha256":"00baf94361e8623c602d6fd384bc46064ac8461e61510b612ba20bd5f1f5425a","size":2325}
++{"mode":420,"path":"backend/test/baseer-v1r20-deploy-e2e.test.js","sha256":"2932692381b8cfe0b16eea8439c6e2df0a6b7e899d658ffccdfb098264bef882","size":7093}
++{"mode":420,"path":"backend/test/baseer-v1r20-migration.test.js","sha256":"67499451345432d4e0abfacf3a8cbb1498d2dcd8a95f1145f5da8f610add6b42","size":872}
++{"mode":420,"path":"backend/test/baseer-v1r20-unit.test.js","sha256":"589271f77967ad90976bc74f3970d6d374298074737c38122eda7282239126d7","size":4341}
++{"mode":420,"path":"backend/test/baseer-v1r21-contract.test.js","sha256":"60d4358b6fa19f0790ffab176d051880c18995ef7ade68f54604f5498468631e","size":4447}
++{"mode":420,"path":"backend/test/baseer-v1r21-deploy-e2e.test.js","sha256":"0ba6876df22f824569831a88aae4670dbbf6c145345ae249415238b236ee9eae","size":5400}
++{"mode":420,"path":"backend/test/baseer-v1r21-unit.test.js","sha256":"1eb6a0926eb8694b63428dfc47527d45ad55ca4cef636f1150afec065a98359b","size":1585}
++{"mode":420,"path":"backend/test/baseer-v1r22-contract.test.js","sha256":"3e6356eb66d9cda81e0c0a7184c1cadeb30a2af30eb3c7f6dfa06e40258fae93","size":2765}
++{"mode":420,"path":"backend/test/baseer-v1r22-deploy-e2e.test.js","sha256":"8befac03201ae04fab6551f74abeaaab94ee3bc667bb430e29f1f791e7d5a7be","size":5046}
++{"mode":420,"path":"backend/test/baseer-v1r22-unit.test.js","sha256":"1e4ef2b61bb64b500322fc57dd3cdec2171d05f8ede004950d72cd491210403a","size":3440}
++{"mode":420,"path":"backend/test/org-chart-v2.test.js","sha256":"b6d0374946b4849be374993b2d266d53108d0a7eef4908898985f5d52ea5513e","size":6589}
++{"mode":420,"path":"backend/test/org-chart-v3-http.test.js","sha256":"5ad55bc071288d7036c4e36ea167db66a4fae096c7c9600b90dc6512360b0fba","size":6768}
++{"mode":420,"path":"backend/test/v5-corrective.test.js","sha256":"90392bdba5bc1ead5a4a28f9e91cbbaf93a3961dc9b5d6424c888f3efb701a0c","size":3738}
++{"mode":420,"path":"backend/test_gd.js","sha256":"dc3845cef2c07ff766e1d2e7f721d577564ca635fb808721278ee5c94362f69b","size":627}
++{"mode":420,"path":"backend/test_prisma.js","sha256":"cb9a1eb6a5d895491ef70a035a917b50a12d328afe2a7a65a2531826c962e068","size":277}
++{"mode":420,"path":"backend/test_upload.js","sha256":"c0db75365bf5efffe1f56be67ed439dced587449adfe8d11a99bdbb2e703ed7b","size":719}
++{"mode":420,"path":"deploy/ecosystem.baseer.config.cjs","sha256":"ab68d95a8291c3121cd6680d2ee4d9ccee6d9d843fc8a0c5423c93bea40f61cc","size":249}
++{"mode":420,"path":"deploy/nginx/thrs-cache-hotfix.conf","sha256":"c95129a0cc8e655a2d5ce1bf4ae19770744cd7be3ed46d8ac58de120e61563c9","size":1062}
++{"mode":420,"path":"docs/THRS_CACHE_HOTFIX_V1_AR.md","sha256":"f4ff3c83a5392ce9b41ec516d30c426acdb99c716e3c09bd0d27a6b3f42593e9","size":1121}
++{"mode":420,"path":"frontend/.env.example","sha256":"2fb6b3ea4fe08994d7b79415050f115389aaf1ba348e26c278a365bda0d97ece","size":114}
++{"mode":420,"path":"frontend/.eslintrc.json","sha256":"d8e530513fab6d5d3534402f796d2f96e1a11c28adef66da65a0a135ccd57fef","size":113}
++{"mode":420,"path":"frontend/package-lock.json","sha256":"95f8b7ae5910879c9cbb7ea9b187bd5811a7fc40ae443cfc9753c598a2d5d100","size":712871}
++{"mode":420,"path":"frontend/package.json","sha256":"a763dfe135bdefb8cb58a377a37b3c5d22725e3a6a7b15c3f8e3ba40fc79debf","size":1366}
++{"mode":420,"path":"frontend/postcss.config.js","sha256":"fe0d5cf3cb8c1922f71cca2da3796f3e63366623ad6164336655766efe330e6a","size":69}
++{"mode":420,"path":"frontend/public/THRS_logo_mark.png","sha256":"cb773bfdf8d48cc6817a016c46c1a0343b3804794553513ceb96c405cd0860a9","size":116632}
++{"mode":420,"path":"frontend/public/THRS_logo_transparent.png","sha256":"7813f364dde7787e6e295e1357b68cbc69e58693937f7dbc58ab0ef194a87d2e","size":167399}
++{"mode":420,"path":"frontend/public/ai-avatar.jpg","sha256":"1d76cc929a5410eb85983391ca57ae555590701104b735c69ca04c0016d4080c","size":33788}
++{"mode":420,"path":"frontend/public/apple-touch-icon.png","sha256":"bc6e6db26a7bcfd5cd7b5cc69c6b524a1dc4961e88abea301d82f407de904b32","size":11389}
++{"mode":420,"path":"frontend/public/download.html","sha256":"3e970ddf80324979034332963c2316407a6f53b25b6ca0bf52b30808c0879599","size":4107}
++{"mode":420,"path":"frontend/public/index.html","sha256":"5f885bfa422d0fef9b1c91cf3d9787ef3188dfd7ae82841886c7ffc6f555f32c","size":554}
++{"mode":420,"path":"frontend/public/logo.webp","sha256":"e3e1df229e6207b267539a3199f176c63106227a9030c336835377d0658910e4","size":2034}
++{"mode":420,"path":"frontend/public/thrs-favicon.png","sha256":"4b59ed9db19d87509fb01be5102a2c9809276a335087fb6954a1c7e1833dceaa","size":2575}
++{"mode":420,"path":"frontend/public/thrs-favicon.svg","sha256":"651d118dc9efd181a2a5a985fbf08ea0b56eab951e605c000d32f6c9850384b7","size":380}
++{"mode":420,"path":"frontend/public/thrs-login-bg.jpg","sha256":"68525c0a2dbf3fe14d1d40ada5e8c9047f2cc297219c6986a1bfffd6cefc53bd","size":148275}
++{"mode":420,"path":"frontend/public/thrs-login-bg.mp4","sha256":"415671358ecdbe3cfa05ea20459e39dfd9b259c8b5fa603255eea521dfeed86e","size":1192862}
++{"mode":493,"path":"frontend/scripts/check-i18n-leaks.js","sha256":"93f5e13b5906fcfb9c932217b2fbd3bb0ae69120212e7a823272f550f5231fc6","size":9830}
++{"mode":420,"path":"frontend/scripts/i18n-leaks-baseline.json","sha256":"db55ccbf6d4deb3fd5289479b200c12ba09981355445be3a56a8592e194742bd","size":49999}
++{"mode":420,"path":"frontend/src/App.jsx","sha256":"10c4793b840c77510d778286a183bf8a8545c3d7b09661db02102af1cd4d7018","size":15629}
++{"mode":420,"path":"frontend/src/components/Attendance/AttendanceTable.jsx","sha256":"a21d8a84a2cd8cf49ab7ee3e19f4c69e34679772ff5ae1bbec85a07b6b660131","size":4871}
++{"mode":420,"path":"frontend/src/components/Attendance/CheckInButton.jsx","sha256":"70e9594be2b4a09d4516e29bfc925c25d6c538f55569ff02b72279faf37f7643","size":3815}
++{"mode":493,"path":"frontend/src/components/Attendance/CorrectionModal.jsx","sha256":"b8748a869de8d2de6ca4c02c1fa7c39f0febf8f22c1ddcb445a8cc475e3e701a","size":4044}
++{"mode":420,"path":"frontend/src/components/Common/AdvancedFilter.jsx","sha256":"afca5b5b8f5ffd1225e9799a598fee3eab85d84965515c1c78c41d5076ce6223","size":8717}
++{"mode":420,"path":"frontend/src/components/Common/AnnouncementBell.jsx","sha256":"e063a8d53f108176c441a636489c739230b50f3fbc69471046af8ed5a719cae4","size":2142}
++{"mode":420,"path":"frontend/src/components/Common/Button.jsx","sha256":"60d254fc752872fe5309b736b079758b499adf58c595a61c79ca07a58e0353fc","size":1153}
++{"mode":420,"path":"frontend/src/components/Common/Card.jsx","sha256":"20517e47b365c35f36660e4849b3b6dbb5b8eddfc0108e74fe2c441fd7be73c3","size":2135}
++{"mode":420,"path":"frontend/src/components/Common/ErrorBoundary.jsx","sha256":"33086924611678010ab8723dff5c5537536b87d9f3238f119c240f5fdd7ed241","size":1554}
++{"mode":420,"path":"frontend/src/components/Common/HRCalendar.jsx","sha256":"9d1d111a851424f6e5e9eaea009f6491445f36bed32a80c33dd120681fc8e751","size":12992}
++{"mode":420,"path":"frontend/src/components/Common/HelpTooltip.jsx","sha256":"498a63533e1f40fb43b64c92345dd7a412f66620fdeee91a6d80a2b9e093d854","size":420}
++{"mode":420,"path":"frontend/src/components/Common/I18nDialogGuard.jsx","sha256":"56b0f2967b6be405837d4004108e607a13305b4cd7b36164ee9e477171097e64","size":1542}
++{"mode":420,"path":"frontend/src/components/Common/LanguageBridge.jsx","sha256":"3a27d089d9c5009980b51927070ee89eb7a2017a86b4b56f10d50ac53ac3c1d8","size":6404}
++{"mode":420,"path":"frontend/src/components/Common/LanguageToggle.jsx","sha256":"64d651d14771cc6297f90acf8e5d39a3707e7f00f9278ef162fc76287261f9a5","size":1043}
++{"mode":420,"path":"frontend/src/components/Common/Loading.jsx","sha256":"b2dbed252b8b8a48d48431859c5431c9020f11c196d1b25d7ed580330992678b","size":870}
++{"mode":420,"path":"frontend/src/components/Common/LordiconIcon.jsx","sha256":"c6cf5a421de50c9acd83e40b80c56617e8f0b96d9eb2eee7dba78449ea6cf472","size":3427}
++{"mode":420,"path":"frontend/src/components/Common/Modal.jsx","sha256":"e3794e17395fbab19f4b52176e0d02006f7a8abc88fda7e3e441e12f777217e3","size":4311}
++{"mode":420,"path":"frontend/src/components/Common/PageHeader.jsx","sha256":"3425f37772979c57cbf0489e6554b75f032bd37a8423319a2a647902d239f85f","size":841}
++{"mode":420,"path":"frontend/src/components/Common/PageSkeleton.jsx","sha256":"accbca8cab37f4ba501bf01160390238cf213ac2de98952bdb40450ac821ca7d","size":8834}
++{"mode":420,"path":"frontend/src/components/Common/Pagination.jsx","sha256":"78e47c39ddf090f1cd2d185299df1f85f2333de28f5405e93cd1f6196882159a","size":2467}
++{"mode":420,"path":"frontend/src/components/Common/StatePanel.jsx","sha256":"7cee83fe104d8ace629d027ecd13b40b83a1928238424779f8d10aa7e8e9838c","size":1187}
++{"mode":420,"path":"frontend/src/components/Common/Table.jsx","sha256":"b7e35bb0e6556fa9faa94291e86041e1446897cc27cb600c10befd4f878d3c5e","size":2808}
++{"mode":420,"path":"frontend/src/components/Common/TableExport.jsx","sha256":"b9eb734aa33bd976c43e6f1ff8b0732e69bd81a31a53d4527e0dd1a00519859e","size":4230}
++{"mode":420,"path":"frontend/src/components/Common/ThemeToggle.jsx","sha256":"94343ada446d13d75e7d079dacb036e31b6d5f24999d07f1a85109a4d5c8aae3","size":1120}
++{"mode":420,"path":"frontend/src/components/Common/TosChatPrimitives.jsx","sha256":"d97af3a40d5a4b139547d6bedaceacc68eea35f39c9dc5fff6ea509340488079","size":765}
++{"mode":420,"path":"frontend/src/components/Dashboard/Charts.jsx","sha256":"3151d82010a80367be2eeb819bf911881b7795d07b7c50168465ffd3c0cfcbd1","size":742}
++{"mode":420,"path":"frontend/src/components/Dashboard/StatsCard.jsx","sha256":"08a2835cdeabbeee5c14ec3ae1ae572e401fb6080db2f76bfa2038857b952b49","size":1326}
++{"mode":420,"path":"frontend/src/components/Dashboard/widgets/AnnouncementsWidget.jsx","sha256":"38f4c14da1aec4783986b27ee41af5b86c8de1339943c937ce5d54db747059e4","size":3610}
++{"mode":420,"path":"frontend/src/components/Dashboard/widgets/DashboardStatsCard.jsx","sha256":"356275933f92ad99e51819ce53f62b9ddc53147afe5db77e47c8f394d05c1e0c","size":3284}
++{"mode":420,"path":"frontend/src/components/Dashboard/widgets/LoadingSkeleton.jsx","sha256":"a34044bd266c066f66dae1f305712897c0dfbf14f90f00936493a2fe4a64cf02","size":470}
++{"mode":420,"path":"frontend/src/components/Employee/EmployeeCard.jsx","sha256":"c628976f5ca0eeca20907eb7d9395e2356629f563e8112e593cbe6f76e06b814","size":1805}
++{"mode":420,"path":"frontend/src/components/Employee/EmployeeForm.jsx","sha256":"1e809024c951971c9c6dae52fe6395eb403b2bd576114ea6c5f0e6d48187e56d","size":18116}
++{"mode":420,"path":"frontend/src/components/Employee/MobileCheckInButton.jsx","sha256":"f1fe554b784c419f989e240f9613f5f055525fc0cf477e5b0d7442b8ff74da46","size":6077}
++{"mode":420,"path":"frontend/src/components/Layout/Header.jsx","sha256":"bb12520ad7e6f5f2d7b2457078e94a40b268d0e791c73c93c350a21d4114218b","size":1985}
++{"mode":420,"path":"frontend/src/components/Layout/Layout.jsx","sha256":"1989bbba2466c859673c29b6be495f3544e8411802d507fb32c832f8f5e15a12","size":984}
++{"mode":420,"path":"frontend/src/components/Layout/Sidebar.jsx","sha256":"9dc80dcedf7b2720fa0f8ea7d61ac2629700a037de4b50ec70124ff18863a9bf","size":9420}
++{"mode":420,"path":"frontend/src/components/Notifications/NotificationBell.jsx","sha256":"6f7a886c8561cf8bb0bece23c3598a65f9fd5d6cbebbcbbcfafdb5abfabb4753","size":3268}
++{"mode":420,"path":"frontend/src/components/Notifications/NotificationPanel.jsx","sha256":"89d3eb4755fc18b6b29724092a98f56e4ab82fc324efd02a6c86051b2d96d351","size":8474}
++{"mode":420,"path":"frontend/src/components/Reports/ExportButtons.jsx","sha256":"00152113bf35b04dfbe481b563abf9581950b28549e213ee10caa96c6d944a7f","size":1663}
++{"mode":420,"path":"frontend/src/components/Reports/FilterBar.jsx","sha256":"ac79823bfc588ad8dff173a4224bea5d663f2ab183dc5e3beaaa24a176e5f896","size":5605}
++{"mode":420,"path":"frontend/src/components/Reports/ReportViewer.jsx","sha256":"a88a485a2bcae6c3d6de74c3a2bc2678243607a956b235d0dc7d2975a1e05c6e","size":8808}
++{"mode":420,"path":"frontend/src/components/RichTextEditor.jsx","sha256":"6e0bd5846ca8f87632695ef4b6870a695eacd8e5edd459f100eef6a455d5e856","size":6961}
++{"mode":420,"path":"frontend/src/components/Settings/DeveloperHubTab.jsx","sha256":"ad77dc63d173d6ff5a0e79b2aa2d37195907d84764313e7a10331b4f008e76b5","size":25894}
++{"mode":420,"path":"frontend/src/components/Settings/GoogleDriveSettingsTab.jsx","sha256":"28c745c8a0d1b80dceb2747972d7dc8e43849d04a5a7a03c7166172176d78e23","size":9098}
++{"mode":420,"path":"frontend/src/components/Settings/HrFilesSettingsTab.jsx","sha256":"f85882c6f55d50f0ef371c3777419d348c4e6b7f13eb82b67293522c7d673bf4","size":20599}
++{"mode":420,"path":"frontend/src/components/Settings/SuperAdminAICopilotTab.jsx","sha256":"3095fa29115f84427859a84f9b7b6b7166f68e802097d867544a6213e65ea0b1","size":36180}
++{"mode":493,"path":"frontend/src/components/Settings/WorkScheduleTab.jsx","sha256":"eea06fe6a79098b3045e3f239db0a9648c96c44392161a156cd338105c21fcf1","size":6158}
++{"mode":420,"path":"frontend/src/components/TOSChat/ChatPanel.jsx","sha256":"983467df6c488e15c557f299dec8645ab21a2fa221e4734fa044adb6a6096d39","size":288007}
++{"mode":420,"path":"frontend/src/components/ai/ExecutiveAIChatThread.jsx","sha256":"12850a41e3edf43992885256a2a43380d2327fd2159912e0e919feced4eb97e0","size":7655}
++{"mode":420,"path":"frontend/src/components/ai/ExecutiveAIComposer.jsx","sha256":"3cbecd8f91d477a9175bce520fda5aca9996e0eb20f29c47dfa8399f6e848260","size":2001}
++{"mode":420,"path":"frontend/src/components/ai/ExecutiveAIContextPanel.jsx","sha256":"39af263dc0f6d98afc5e33a00e91bba0458b19a9254d93c4df1624350271e731","size":8560}
++{"mode":420,"path":"frontend/src/components/ai/ExecutiveAIFloatingLauncher.jsx","sha256":"8c1595a15784ded8d1346595249ca3827a2f39ae287e6705da8dd558696be2d2","size":9140}
++{"mode":420,"path":"frontend/src/components/ai/ExecutiveAIHeader.jsx","sha256":"ff926af7e69494c281484601c31c8a48c2cb4d2ab06c2230b35c816c43919e87","size":3400}
++{"mode":420,"path":"frontend/src/components/ai/ExecutiveAIOrb.jsx","sha256":"da4acdd10d5abd5fa3d760e56422e282880f76aa4e4f79c52ad1e2e2091e1140","size":524}
++{"mode":420,"path":"frontend/src/components/ai/ExecutiveAISidebar.jsx","sha256":"88111b3c188830612d1fa95944708a979bc8c0faae244c4f21bbd390355cdf98","size":4519}
++{"mode":420,"path":"frontend/src/components/ai/ExecutiveAISuggestionChips.jsx","sha256":"d3c6e388335b9b0a307cbba72faae893a6021e6a1f67207f6480aad4d0776448","size":1052}
++{"mode":420,"path":"frontend/src/components/integration/ClientStatsWidget.jsx","sha256":"6eebf775d5d2aee484ed8d0fc252a1b3f04aa238d34b24b4766f1cb0303f389e","size":2566}
++{"mode":420,"path":"frontend/src/components/integration/DeliveryMetricsWidget.jsx","sha256":"e7f31c721810e4efdca05f04c4f6346b2fa8902152bba856f8f4d797bd17eceb","size":4016}
++{"mode":420,"path":"frontend/src/components/integration/IntegrationWidgetShell.jsx","sha256":"f10accd75cd8ae9d214576ed1fea7ef3b31005f453a74fed4d97366642eeb86b","size":3400}
++{"mode":420,"path":"frontend/src/components/integration/MyProjectsWidget.jsx","sha256":"eed62aa530f93528dab05726224ab482e983f4fcc9a8dbb3dced8a588e06a5fc","size":3223}
++{"mode":420,"path":"frontend/src/components/integration/SatisfactionWidget.jsx","sha256":"ee8612008dd44329856241cbbd99d63eb7616b3a20b4abe0f14d00d2249fc13a","size":3897}
++{"mode":420,"path":"frontend/src/components/integration/UtilizationWidget.jsx","sha256":"b0d421b92d9da50e51f80467fe033da48db14c8eb4618b0d19041eadf3ca5473","size":3663}
++{"mode":420,"path":"frontend/src/contexts/AuthContext.jsx","sha256":"81936818ad9e3ba5ba22b58e03bbbf07db4b26c5e6c3b74acda2d0f4e6e06478","size":4140}
++{"mode":420,"path":"frontend/src/contexts/DirectionContext.jsx","sha256":"8a3d8aeff61d1a7219a2309cce25bc617d9cfe5fc9f2dd0928fc0106a5fcfc01","size":2835}
++{"mode":420,"path":"frontend/src/contexts/NotificationContext.jsx","sha256":"1b00a3693a2be7950230dd0c6c06bbfcaede616d688679da518c9cbff72ae5f2","size":4565}
++{"mode":420,"path":"frontend/src/contexts/ThemeContext.jsx","sha256":"c63eb821bc2f544b856b565583aabc97d730d4610fe4b0c28063edb9cfce52e7","size":1652}
++{"mode":420,"path":"frontend/src/contexts/TosChatPreferencesContext.jsx","sha256":"54a1a887f07e38b387787c3dd87ec09cd0901b1cc65c336b006ccbf240299165","size":961}
++{"mode":420,"path":"frontend/src/hooks/useDashboardData.js","sha256":"8659c3891b3c8a4def973da489e58a72ad847b8a35e179450f2ac8e2b520f2da","size":842}
++{"mode":420,"path":"frontend/src/hooks/useTosCentralChat.js","sha256":"24c2be3fceeea4a01e41b1edf5c3baa0e229fddc961ecf5b3427333057800107","size":21894}
++{"mode":420,"path":"frontend/src/hooks/useTosHuddleWebRTC.js","sha256":"b09ec27e000c3ae97fa7abbf74eb1c1273670ca594d657ae1c1da1256e27d68d","size":712}
++{"mode":420,"path":"frontend/src/i18n/index.js","sha256":"85461413cb8acceda34688d48846f48e934a285050db16a8858f124c32f67f61","size":407538}
++{"mode":420,"path":"frontend/src/index.js","sha256":"e1e549fe19107c357b859c63ba9b51be25817a303714295cde3e6f0716b5be25","size":454}
++{"mode":420,"path":"frontend/src/lib/fileSize.js","sha256":"933fbf27586b328ba8cba16323f4b61818d91b8d785fc11dd2a9b0b870276815","size":963}
++{"mode":420,"path":"frontend/src/lib/tosChatApi.js","sha256":"3c6b76207c041e433cb2ac6b8aa4397bf0bcdf972f82d96cc4804dcbcb06472b","size":6317}
++{"mode":420,"path":"frontend/src/lib/tosChatErrors.js","sha256":"b7f6f51c930d65b1f4b0dea33cdc9c736ee8295e8523b34755073366570f3d89","size":3620}
++{"mode":420,"path":"frontend/src/lib/tosChatPermissions.js","sha256":"b311fe281ce13f94746d04769d2e12ac9c406e1642395d69f1d6dcb685679a7d","size":627}
++{"mode":420,"path":"frontend/src/lib/tosChatSocket.js","sha256":"4b8e1a16b51cdbefdd5b6934f1679bf67cfa1a2ce6f5298f5a95033ca16dd84d","size":255}
++{"mode":420,"path":"frontend/src/pages/Announcements.jsx","sha256":"478813e2d734dfc5f5713bdc04e03850d0609b92b2fe6a84cb42a13fcb2c11c0","size":13289}
++{"mode":420,"path":"frontend/src/pages/App.jsx","sha256":"e865a90bf7d1f0d37bd17e3cace70587964d3dfb02b52942a75794560f2b3923","size":4755}
++{"mode":420,"path":"frontend/src/pages/ApprovalWorkflows.jsx","sha256":"5fc2705a1c14332c8097b764006c57212c3ab1e5bb80fba84a4907fe42e79b4a","size":48291}
++{"mode":420,"path":"frontend/src/pages/Attendance.jsx","sha256":"15df11b873d28875ba5dbc11796c17974648776ff5e625993bc85a948e4e6c6f","size":146063}
++{"mode":420,"path":"frontend/src/pages/BaseerCandidateInterview.jsx","sha256":"a36dd30334dc04a2bab782da27daa3dc8af3ac62d3eb798188b7ffab131284e6","size":6981}
++{"mode":420,"path":"frontend/src/pages/BaseerWorkspace.jsx","sha256":"90a1bbcaef3c70a5243b34d46625e0a94ab95dcf1d3d8e78e8acd215d18b4df4","size":6046}
++{"mode":420,"path":"frontend/src/pages/Benefits.jsx","sha256":"7eb9df4e01c6deb30943e16a137b127073447f9323d2155e3d5bf3c6ad1744e7","size":18829}
++{"mode":420,"path":"frontend/src/pages/Dashboard.jsx","sha256":"cf3f2e470fa70afa2f828b3f44718c7c8f89eccf0af35afa1f326165dd57af0f","size":11252}
++{"mode":420,"path":"frontend/src/pages/DashboardRouter.jsx","sha256":"6af9d12a327dee046d5894de95530c2702290d7fbed48f0f0812d792c651f729","size":1350}
++{"mode":420,"path":"frontend/src/pages/Documents.jsx","sha256":"066fc6c15bc0a2d3608ace18add597004fc1ac411a988b17687f03f390b9b081","size":13666}
++{"mode":420,"path":"frontend/src/pages/EmployeeDashboard.jsx","sha256":"16274666daea380588a6fe76ad3d1131a8f08eca1cd8e1d9994be80650cdc912","size":15882}
++{"mode":420,"path":"frontend/src/pages/EmployeeLogin.jsx","sha256":"945d49fe88eb32ddca8032e6664084ff4e2c9ca0600d5f456537d07d637b14c1","size":11239}
++{"mode":420,"path":"frontend/src/pages/EmployeeProfile.jsx","sha256":"aec0804c33bfad473148f87d558826a988f8b80599c82242d6d3a7bb37984f21","size":103674}
++{"mode":420,"path":"frontend/src/pages/EmployeeProfile.jsx.phase2","sha256":"ba5644ceb71b7426f6ec9f4b86de5c34baeac8691721f5cf08375f7b4a00509b","size":10579}
++{"mode":420,"path":"frontend/src/pages/Employees.jsx","sha256":"7c27715c72198d477388a18f31254fd53ba0b061aa836714874c3d9b69212611","size":21761}
++{"mode":420,"path":"frontend/src/pages/ExecutiveAIWorkspace.jsx","sha256":"3b144531220edd102c26793995dc935e97521373002c7817dc9fb1185e38d156","size":10942}
++{"mode":420,"path":"frontend/src/pages/ExitManagement.jsx","sha256":"1a1a068b36cea6377eb72311a791e30d8587ad4944a38b4a32f30e3eaf725f8f","size":14996}
++{"mode":420,"path":"frontend/src/pages/Feedback360.jsx","sha256":"1fbf43a913a7fa5551ea44efe09b737e59b80036ff780b3760ad3a611d944ea4","size":1712}
++{"mode":420,"path":"frontend/src/pages/FeedbackCycles.jsx","sha256":"dd8fe987190bed1b478345533a1c83b5db54f667ffdb80df1796ac930b669b1f","size":10950}
++{"mode":420,"path":"frontend/src/pages/FeedbackResults.jsx","sha256":"d15235af00be2b6602e1d22e61799b0306de2f6007c42953c1f391a8112eab13","size":8359}
++{"mode":420,"path":"frontend/src/pages/HelpCenter.jsx","sha256":"1487b9ade86f63a4799032105515e25d8045c0ca27f3d2eb5af3da373ca550a1","size":19665}
++{"mode":420,"path":"frontend/src/pages/HelpCenterAdmin.jsx","sha256":"4c06d27b335732fb10c8680a9c31a170bc57795ba53868b69e04c2d156610444","size":27619}
++{"mode":420,"path":"frontend/src/pages/Internships.jsx","sha256":"9a3e466f7d90ec44a76d4aa6ad9aae37b675944be66d12ef664c16cdcc6045b8","size":7170}
++{"mode":420,"path":"frontend/src/pages/Leaves.jsx","sha256":"15dde43b86b7a3ffd79b91505d76ab9e41c530bae636fe9b462d4c8adaa4c642","size":38069}
++{"mode":420,"path":"frontend/src/pages/Login.jsx","sha256":"bb3df2d3618286bf6d47a6cac5893f2ff22fa73711c7f60b4614ab1b6b41fa47","size":21361}
++{"mode":420,"path":"frontend/src/pages/MyFeedbackRequests.jsx","sha256":"d35c1432026d1560c51cd7b32bc2704b28c53a92460231d89db220ff34607fd8","size":3897}
++{"mode":420,"path":"frontend/src/pages/MyGoals.jsx","sha256":"14f6dfb7a8e773d9bf9b3e08f3f4b3d20729b7ee7590e0d83b7a0458cbfc9ad9","size":11290}
++{"mode":420,"path":"frontend/src/pages/OAuthCallback.jsx","sha256":"b43a68d015c7d17db363176df00b6e03ada6407c3a8fdfc4b2349691cc86b40b","size":2224}
++{"mode":420,"path":"frontend/src/pages/Onboarding.jsx","sha256":"bf413d071596de95ca548319068f1f8c14761c7a746c44916c5e9799d1d87099","size":36828}
++{"mode":420,"path":"frontend/src/pages/OrgChart.jsx","sha256":"131359a9063982e0d3cbf8dcd1e384242ff984a7248f22539adc12215f351fb4","size":28303}
++{"mode":420,"path":"frontend/src/pages/OvertimeManagement.jsx","sha256":"67fc27c864c8a9db767452852acdf2cc3c96a8094784b82eedbf725b47074d05","size":14429}
++{"mode":420,"path":"frontend/src/pages/Payroll.jsx","sha256":"4ca468e7db61470e1ac93acee45010cec7a1d4777f23da468f6d0d003c07b6fc","size":72383}
++{"mode":420,"path":"frontend/src/pages/Performance.jsx","sha256":"1d9b7bd24004416be2d33ba66fb1ef0f716542c6d79fe100c2a8483da97ed442","size":22278}
++{"mode":420,"path":"frontend/src/pages/RecognitionWall.jsx","sha256":"5485a0268c80460c65b334d9366d014f5c8fefd928441ac9efbf477baadf6a03","size":9885}
++{"mode":420,"path":"frontend/src/pages/Recruitment.jsx","sha256":"6671f35e10a5bb2da159efd36e60644c8e55ad422f6c32641b9d511da2624c21","size":120583}
++{"mode":420,"path":"frontend/src/pages/Reports.jsx","sha256":"255503b10edf8359d4c4ff1d4d4b1dcfaf012d0bda2dfab0b3ec5ddccc613968","size":21901}
++{"mode":420,"path":"frontend/src/pages/ReportsHub.jsx","sha256":"1f822bc0b265193f67690949a45658dbfa8b7bd1c6a237bb92f77d6136a0fa40","size":27734}
++{"mode":420,"path":"frontend/src/pages/Settings.jsx","sha256":"8635809316fcae739c5d671a378470f3e353d65e8c78e4808e874d0393f36c54","size":53357}
++{"mode":420,"path":"frontend/src/pages/ShiftManagement.jsx","sha256":"0f8d2ebf4509062411fd2ba410d361c5df4dd5d6ff851076801154ae5384b8df","size":25331}
++{"mode":420,"path":"frontend/src/pages/SkillMatrix.jsx","sha256":"ea52c54402459cfefd4735ec7fab235ae2cae6366cca88e1fad5f9c5ccbd0f7b","size":10974}
++{"mode":420,"path":"frontend/src/pages/SubmitFeedback.jsx","sha256":"ebec7be1fba69cdeca1910e9ff20ba7d7dae967fcad68b0bc5da084a6102c227","size":5244}
++{"mode":420,"path":"frontend/src/pages/SupportAdmin.jsx","sha256":"32d1bdfd5da93b0338c4633179c2b20268978c72e83516994be18e780240c66a","size":31506}
++{"mode":420,"path":"frontend/src/pages/SupportCenter.jsx","sha256":"99da6c22c44f45d2d603e2499ad847f5c8fdb2b17863b332566a5c2948f90393","size":35826}
++{"mode":420,"path":"frontend/src/pages/Surveys.jsx","sha256":"ba3792b23f58cfff635d7d275c517da2dc07998f930f346c5f3ada55c26bdbf7","size":28853}
++{"mode":420,"path":"frontend/src/pages/TOSChat.jsx","sha256":"702fe7b677395fb45d02fb9737af5d30ac9e1a0c9ce8ff22868e54a7e9e1b509","size":6130}
++{"mode":420,"path":"frontend/src/pages/TScoreAnalytics.jsx","sha256":"b1b11162adb8b6d6683518badf727a3f2e6223005fcaf5c9e5a6bff098db9c4f","size":4465}
++{"mode":420,"path":"frontend/src/pages/TScoreEvaluationForm.jsx","sha256":"114d3685f42710a692c0754279ecced3ca60eaf669da0d9d6b4d093fa85e36b2","size":8325}
++{"mode":420,"path":"frontend/src/pages/TScoreEvaluations.jsx","sha256":"76fdc96f3e70cfe192a6101aef0a9082c3c7d539c7dce2f0a4ea45370d48eaf5","size":5334}
++{"mode":420,"path":"frontend/src/pages/TScoreTemplateBuilder.jsx","sha256":"b025c2ec025cd614461fa757a67dc82022b8679b035bf8898603316f9ce348f9","size":9417}
++{"mode":420,"path":"frontend/src/pages/TScoreView.jsx","sha256":"10073919c72e55b0110a1a59101e37bd19c7e032da612c2eb53cdeda49961330","size":6398}
++{"mode":420,"path":"frontend/src/pages/TeamCalendar.jsx","sha256":"07f106377765eb23fe208a3dbbff66f15b45cfe3277b44e53dfa912177f73821","size":6510}
++{"mode":420,"path":"frontend/src/pages/TeamReports.jsx","sha256":"7f1d013379abadc88290aabe9cb150938d72a050c371feedcab7488f9e15b759","size":26825}
++{"mode":420,"path":"frontend/src/pages/TosRequests.css","sha256":"fd03d99ace68a4814e226983be588630ba882a9c9d117d6769fd3549eab69ff9","size":30182}
++{"mode":420,"path":"frontend/src/pages/TosRequests.jsx","sha256":"360e6fac097a5eb0966b0d0ebb0360d22a9c170688ef7fddbbac5f6283008703","size":31607}
++{"mode":420,"path":"frontend/src/pages/Training.jsx","sha256":"ad2a90a4560b36649a92bf715120ae66cb1ef83914552f0ed5be94968bd233dc","size":6895}
++{"mode":420,"path":"frontend/src/pages/WorkSchedules.jsx","sha256":"da89c9eedc2e6fd28d75a22c5c323b231f0f8d8fbf092daccd05ff0a7d9b7a89","size":55990}
++{"mode":420,"path":"frontend/src/pages/dashboards/CMODashboard.jsx","sha256":"07ad315761fb2cd2e47770c683e406a2199fbe5e68a4ab3d76c73b01050c2118","size":3746}
++{"mode":420,"path":"frontend/src/pages/dashboards/DepartmentDashboard.jsx","sha256":"a2100464c71ea1a57f5c6ce033de54b31a6eeef8bb8d17e3a37985061346e6b2","size":3478}
++{"mode":420,"path":"frontend/src/pages/dashboards/ExecutiveDashboard.jsx","sha256":"1199e216b57676fae8196791182ec1b06f5b820a756f30268e8303f2055c649d","size":25822}
++{"mode":420,"path":"frontend/src/pages/dashboards/HRDashboard.jsx","sha256":"ffa49bf537505ea5f089454c1df720c776699a577b8bd235a04b839d851c998a","size":17086}
++{"mode":420,"path":"frontend/src/pages/dashboards/MarketingDashboard.jsx","sha256":"5d900ad010de8ac6152d8f9b9ac770febf92e4c39fd80900f54a26f7b79341b8","size":2918}
++{"mode":420,"path":"frontend/src/pages/dashboards/OperationsDashboard.jsx","sha256":"dcaf5364769701f99a35d946a56deeb1c927bba0987a08dd486d158ae5b4f31c","size":3204}
++{"mode":420,"path":"frontend/src/pages/dashboards/RecruiterDashboard.jsx","sha256":"558ea7d5ddd78cd6c336aaf3362d8700378e560def71ebb5c0912fee0cb094ca","size":3341}
++{"mode":420,"path":"frontend/src/pages/dashboards/TeamLeadDashboard.jsx","sha256":"16bd42158fd047e063a5e39268793e4a04f9ec279de06f85f1e95834d4b2f632","size":4484}
++{"mode":420,"path":"frontend/src/pages/dashboards/TraineeDashboard.jsx","sha256":"8c0836d9b6be96599aed10783005a910fa3ca3b6bca541a986104ac7d038e442","size":3087}
++{"mode":420,"path":"frontend/src/pages/dashboards/_premium.js","sha256":"49f58b00e155f46511babf2f6ac07be6a68bd77cbed4a5cf729697235aa72114","size":7632}
++{"mode":420,"path":"frontend/src/pages/dashboards/shared.js","sha256":"ea9925a9a1e44d871b6c3e3dac0e7c776154ed2fe68e5fc3ade5f3f775cf9a6c","size":2740}
++{"mode":420,"path":"frontend/src/pages/reports/AttendanceSummaryReport.jsx","sha256":"6d3a9c99f0dbc044d015073ea417795dce027e646f3df940417a08c5293271b8","size":1434}
++{"mode":420,"path":"frontend/src/pages/reports/CompanyOverviewReport.jsx","sha256":"5a676d2059e7ec08810682854fbc0d6e077e6f246f6d8781fb7107b55f44acb3","size":1602}
++{"mode":420,"path":"frontend/src/pages/reports/DiversityReport.jsx","sha256":"aabc8f7be0ae6ff23757dd42e7460f599b25508d94313e89315a1ceb572c6389","size":2105}
++{"mode":420,"path":"frontend/src/pages/reports/HeadcountReport.jsx","sha256":"66a79c51988d092fbede647111e7149d1790033f2b8beeb1a67bf1312ac37754","size":2225}
++{"mode":420,"path":"frontend/src/pages/reports/LeaveUtilizationReport.jsx","sha256":"6366ae9ba951a2e6c5cb8d36ff42a5dfc99b42a29c0dedc71a513aa60280d874","size":1330}
++{"mode":420,"path":"frontend/src/pages/reports/OvertimeReport.jsx","sha256":"9b862e21f7c7a5be89efffda0dee6a57be5a9145f9cc4957b25341125802f9ba","size":2040}
++{"mode":420,"path":"frontend/src/pages/reports/PayrollSummaryReport.jsx","sha256":"4758102cbfa8938e283f4ee027fe64560650db111a473790924f4da810898ffd","size":1450}
++{"mode":420,"path":"frontend/src/pages/reports/PerformanceSummaryReport.jsx","sha256":"95658118e57fc541b7c8a92992615640b53208eb8843bf6ff9c222378cea3b84","size":1551}
++{"mode":420,"path":"frontend/src/pages/reports/RecruitmentFunnelReport.jsx","sha256":"968d3aab3b3beae43d84270602719964dd733c80f9216c1c54ddb3070e7bfe44","size":1567}
++{"mode":420,"path":"frontend/src/pages/reports/TopPerformersReport.jsx","sha256":"76c8d78f161fb3e9372764473601ca479a7ebbf44109a9631f7a5371f72f9998","size":857}
++{"mode":420,"path":"frontend/src/pages/reports/TrainingCompletionReport.jsx","sha256":"b6ca27c5360c8a7089cd5dda441cea5556dacda34950cfd7255b1f0eed568520","size":1327}
++{"mode":420,"path":"frontend/src/pages/reports/TurnoverReport.jsx","sha256":"dc2455ae81275e6b1153148319796d097d7c0b040fd94200ab9ef32731b64d36","size":1827}
++{"mode":420,"path":"frontend/src/routes/phase5Routes.js","sha256":"af465584c6cf5a44246d96085af922697e2a8e613f3344d296e5a4d6d962dfc6","size":821}
++{"mode":420,"path":"frontend/src/services/adminAgent.service.js","sha256":"432734e43e9d9827e298a15eea90484863ccac6470f2830b2c470767b2547073","size":970}
++{"mode":420,"path":"frontend/src/services/api.js","sha256":"d70213381fd060154e560bf144025da1ee7c223fb4a40f4059e4f1d66b43737c","size":2793}
++{"mode":420,"path":"frontend/src/services/attendance.service.js","sha256":"c3748e3c20cbc2c061e0f35a1ad4572a787b0c0cefa5bb2dbbe56db8f0166870","size":1490}
++{"mode":420,"path":"frontend/src/services/auth.service.js","sha256":"541aed2710605fa8d17d723c3e6c4e53529d7189595ac0a2c403e565c8f2a39b","size":528}
++{"mode":420,"path":"frontend/src/services/baseer.service.js","sha256":"242723815f21f7a981cef21210b8b4d0260758e5c28cec19b642b7e909da2770","size":2903}
++{"mode":420,"path":"frontend/src/services/dashboard.service.js","sha256":"506a70c797d791cd49b32dc00b26931eebca58ae3ca15736a33972a1213f757f","size":156}
++{"mode":420,"path":"frontend/src/services/developerHub.service.js","sha256":"94d1b8a62b000739d006e429f6cd2864ea53cc442583dacdb1e2d52c28c6bf9f","size":1967}
++{"mode":420,"path":"frontend/src/services/employee.service.js","sha256":"62edac190792ddeba1bd68cf79e0934b74db56cf914f00c091676d4b3bfe5457","size":533}
++{"mode":420,"path":"frontend/src/services/gps.service.js","sha256":"4935a82c5b20aa02efd222ac547d6588a52241bc3e08ed40103b4ba53cb54cb4","size":1340}
++{"mode":420,"path":"frontend/src/services/integration.service.js","sha256":"9443b66168835b30a2bdfc2def1ae3a31dd6aca0595add34ed5084e938362a9e","size":687}
++{"mode":420,"path":"frontend/src/services/support.service.js","sha256":"7f8a4b16b1d7f7b9c39f6d2b69b14665e9881706050c1f08b4952fd29685d242","size":1170}
++{"mode":420,"path":"frontend/src/styles/attendance-page-design.css","sha256":"eb49da64795cf5863cc297c744ba2c171e68fbbc7202ca5ce2192b36fdf5cb86","size":15197}
++{"mode":420,"path":"frontend/src/styles/baseer.css","sha256":"f9c90b0a90edf583e6418fcc0eff8bad9ed064a63253504815bc72b42a46f7cf","size":5497}
++{"mode":420,"path":"frontend/src/styles/executive-ai.css","sha256":"2134661b13d100b950155b2d8d000c9f3dbe1ffb5349efa2cb8d66e9f3bbece2","size":27696}
++{"mode":420,"path":"frontend/src/styles/global.css","sha256":"fb6eac2ef9fc4175ce3ff9fb0ed9c0861047a3ed4703e084fc47395fc7cd2ea6","size":25784}
++{"mode":420,"path":"frontend/src/styles/org-chart-ui-only.css","sha256":"9e22ec1861cb109ba3797b9a999c4b1d9771f064f4970079e6789ffdbf5f03c7","size":43080}
++{"mode":420,"path":"frontend/src/styles/rtl.css","sha256":"37856ba1e4873323bf05d9cfd3c489d1685712ab930e8b791eae0ebe0deebcb2","size":3955}
++{"mode":420,"path":"frontend/src/styles/settings-page-redesign.css","sha256":"29b40ea997cd4b04c0509dc388caa5bba485796598f9289aa170ce06489cfb61","size":22026}
++{"mode":420,"path":"frontend/src/styles/thrs-components.css","sha256":"d0d886781965a1faa9778e4d72463ac9d69f2863ea915adee53f97ecc2356f34","size":88700}
++{"mode":420,"path":"frontend/src/styles/thrs-foundation.css","sha256":"e2f8bfc55261a079b11ca7990798f186b320fc3cd65f3fd11a02f23a50364b2b","size":3894}
++{"mode":420,"path":"frontend/src/styles/thrs-layout.css","sha256":"ad851ed8750ce65fb164c7786ba08c880bba1cbba9dfb5de113d05773ebf1f2f","size":32149}
++{"mode":420,"path":"frontend/src/styles/thrs-main-dashboard.css","sha256":"8640624db3abdc34b67b3a326054dd6deb2b28eb89a5a951cf75285d463698e7","size":41633}
++{"mode":420,"path":"frontend/src/styles/thrs-pages.css","sha256":"e199915b682429cd87892d9ace82e122e2b0154dce3ac7b2d0dc2ef19e11e563","size":133622}
++{"mode":420,"path":"frontend/src/styles/thrs-recruitment.css","sha256":"ed036567554a9bf95365e35a3cc6a4a04ead60ea2273f6503104efdc006a42e7","size":105748}
++{"mode":420,"path":"frontend/src/styles/thrs-responsive.css","sha256":"17510440e9ebc5fb999f9850858e643ec6d7e11a4c03504556918dfedfb94bbd","size":21060}
++{"mode":420,"path":"frontend/src/styles/thrs-tokens.css","sha256":"cacf65e44995715bc8ff6c314952b95cafe5aebd33896b20314dce1fe7ac1888","size":18779}
++{"mode":420,"path":"frontend/src/styles/thrs-tos-chat.css","sha256":"76dcd9163bffc1bf29fa04762e0f5a0553c4ee06b575ae25d0d1292189e89eaf","size":85348}
++{"mode":420,"path":"frontend/src/styles/thrs-utilities.css","sha256":"332e1b5e48a3721ebda914d08d19e218488541d5a701621c3f7c6cc3b89fb49e","size":2086}
++{"mode":420,"path":"frontend/src/utils/cacheHotfix.js","sha256":"34630310bd58332f0640bd7783352ea6fde79371d023b3349e83e53ec9914d94","size":1381}
++{"mode":420,"path":"frontend/src/utils/constants.js","sha256":"142cd642c74fe6a5e53c79146445f1b5a86ef4724c72a6a6bab4395dcf098ff2","size":1704}
++{"mode":420,"path":"frontend/src/utils/helpers.js","sha256":"c1ae8de350383f36522659351b70bb18d0983930834c80cd8dfe9693995e1ad5","size":3514}
++{"mode":420,"path":"frontend/src/utils/i18nDialogs.js","sha256":"0c31e5824ca114b8e6c1a32ffe5a8cf9c6a651224d04e4183bd487f0810d7f5b","size":11752}
++{"mode":420,"path":"frontend/src/utils/i18nReact.jsx","sha256":"a1aa713d7c558ae6cf88ad4c8f9b966c1fa4fdce482f855d178c83127f9499df","size":2519}
++{"mode":420,"path":"frontend/src/utils/orgChartTree.js","sha256":"4d0fc447cb8325b1519bcbaacc493827ec83194bda8b685962744e9ef0cff3fa","size":3418}
++{"mode":420,"path":"frontend/src/utils/orgChartTree.test.js","sha256":"f58928c78bec61a3241b29fc495548ece1911b13cf49069c90c17505184667a1","size":2660}
++{"mode":420,"path":"frontend/src/utils/superAdmin.js","sha256":"6c5adb7e5b3316fe24d368c0e80b5d0488535d703d80f5af048fa4d70358604c","size":786}
++{"mode":420,"path":"frontend/src/utils/tooltips.js","sha256":"340f2c0eb997690dcda9f18fd51a2d764f9feeb6eef4c2f8ee4bbcb6478fa473","size":12473}
++{"mode":420,"path":"frontend/tailwind.config.js","sha256":"55ac1ad3e20168499e37b6b1577b80303c7a0413be15ddd72ccd7876663b121a","size":209}
++{"mode":493,"path":"lib/baseer-v1r16-deploy-lib.sh","sha256":"6dcd80ced2a31395cfac45db6984e60a07fb0c5fa304c512baad25ebec05d7ce","size":4898}
++{"mode":493,"path":"lib/baseer-v1r17-deploy-lib.sh","sha256":"0bbb7b7683ce635723be5b52eea7175b7d32ce5f47055643316265c5d0b7592c","size":7310}
++{"mode":493,"path":"lib/baseer-v1r18-deploy-lib.sh","sha256":"92460e5057657e0e7622a7367371589793ceeecaa358bb2b93e7ea089af4b446","size":6824}
++{"mode":420,"path":"mobile/TamiyouzHRMobile/.expo/README.md","sha256":"3858a72afab113a01508b58b4df4d20aa3d2236d2b629878b8dc2317aee0fe6c","size":756}
++{"mode":420,"path":"mobile/TamiyouzHRMobile/.expo/devices.json","sha256":"bf26ff34a2c5780a4d64769a297a4a82915df9b8f7b1096173f0fbcc20550e6e","size":20}
++{"mode":420,"path":"mobile/TamiyouzHRMobile/.expo/settings.json","sha256":"5a3395af6d710da90ebe96bf69d962d31b55f2737cf6592a9ddece85e5629686","size":33}
++{"mode":420,"path":"mobile/TamiyouzHRMobile/.gitignore","sha256":"6dd50d2fcaf75fd6b536b65963b9dd5fe74447e072d1fe8bf216e7a49f9a26de","size":21}
++{"mode":420,"path":"mobile/TamiyouzHRMobile/App.js","sha256":"71285a1fd5857741bfd2af387ba683270796e0c758d82d4cef6e3a4c9be1b4de","size":336}
++{"mode":420,"path":"mobile/TamiyouzHRMobile/README.md","sha256":"060e9a31961264011105c079b5c1d77ea29ee36133e3d90cf76b053bee1606b9","size":2390}
++{"mode":420,"path":"mobile/TamiyouzHRMobile/app.json","sha256":"8611714061daa9828c4a74132808171fb441f3aa91e4c7120c8982143e611b9c","size":1730}
++{"mode":436,"path":"mobile/TamiyouzHRMobile/assets/adaptive-icon.png","sha256":"303067225c7d0cc358905141ff18ea4d6080519c962f229c0804a6a39b6baaa7","size":56558}
++{"mode":436,"path":"mobile/TamiyouzHRMobile/assets/icon.png","sha256":"733dc75175576b494176e19af87676588a520dc73f1d4913b09825687c43cba3","size":72690}
++{"mode":436,"path":"mobile/TamiyouzHRMobile/assets/logo.webp","sha256":"e3e1df229e6207b267539a3199f176c63106227a9030c336835377d0658910e4","size":2034}
++{"mode":436,"path":"mobile/TamiyouzHRMobile/assets/splash.png","sha256":"89579a5dc755cac2c50d487468c7b33d58a25087464a8e3f5b3e90e0c6d7d79c","size":56300}
++{"mode":420,"path":"mobile/TamiyouzHRMobile/babel.config.js","sha256":"2a9be300c5e2ebad50c695a426a52af66db224a092e1308cf2689daf4061acb9","size":107}
++{"mode":420,"path":"mobile/TamiyouzHRMobile/eas.json","sha256":"3127222f7ba9117bd7961e9dd333302e6ce51153e707be325a170344997f04e8","size":351}
++{"mode":436,"path":"mobile/TamiyouzHRMobile/package-lock.json","sha256":"1b9661e05125ac0897ae73dd931461a0489c6f46737330745c072cf2fb1cbaeb","size":334553}
++{"mode":420,"path":"mobile/TamiyouzHRMobile/package.json","sha256":"6df4a051bf60dedc00da2350c35798e15e14aa6a8e21ec0b96dd0a3601971957","size":1073}
++{"mode":420,"path":"mobile/TamiyouzHRMobile/src/contexts/AuthContext.js","sha256":"e305622e157dd1b662db01a8b12716172f7bbc1499995fad96640b2cbd3f3d85","size":2648}
++{"mode":420,"path":"mobile/TamiyouzHRMobile/src/i18n/mobileI18n.js","sha256":"f66a010be65c94e3c28597780694edb26643551c2237c91678d17013656aa1f6","size":20145}
++{"mode":420,"path":"mobile/TamiyouzHRMobile/src/navigation/AppNavigator.js","sha256":"46cfc99ecf098b9ecf22b9df6da15e13b16032c5cace2a818889a81fd91934f7","size":14537}
++{"mode":420,"path":"mobile/TamiyouzHRMobile/src/screens/Auth/LoginScreen.js","sha256":"f090ef18a8d35af5933a26e34e966d405fa05476b76108485e8de00532244344","size":16458}
++{"mode":420,"path":"mobile/TamiyouzHRMobile/src/screens/Employee/HomeScreen.js","sha256":"937653d6cf12c6c4509817c42093c3401dcc31bca22d01408f54f15c0a8c9ddf","size":15726}
++{"mode":420,"path":"mobile/TamiyouzHRMobile/src/screens/Employee/LeaveRequestScreen.js","sha256":"afca6d3728ef225fc8348b47218ba5c7c278e02b802fe81baf068a3ccea2fb8b","size":25107}
++{"mode":420,"path":"mobile/TamiyouzHRMobile/src/screens/Employee/NotificationsScreen.js","sha256":"5e55ed1cc44111c02a0c2162ef58784a90dbf7a8f58442dedab5bc315d75a03f","size":8331}
++{"mode":420,"path":"mobile/TamiyouzHRMobile/src/screens/Employee/PayrollScreen.js","sha256":"dfff53dc09628b826e867a3028be2490327869c0201280bdeacfbffa1d299f19","size":9954}
++{"mode":420,"path":"mobile/TamiyouzHRMobile/src/screens/Employee/ProfileScreen.js","sha256":"d81e691027769465ccbdca47db6253e2ac296c399a9acdd90f8c96817c4eabf6","size":18207}
++{"mode":420,"path":"mobile/TamiyouzHRMobile/src/screens/Executive/ExecutiveHomeScreen.js","sha256":"b9d71caf76f2edb60059c708589030eba047642d0e87ee613131b0b8d7aa47aa","size":7629}
++{"mode":420,"path":"mobile/TamiyouzHRMobile/src/screens/HR/HRHomeScreen.js","sha256":"89366dcbd34440497d3636d1eed43926509a017bf46ad22ada1824520672b0af","size":7487}
++{"mode":420,"path":"mobile/TamiyouzHRMobile/src/screens/Manager/ApprovalsScreen.js","sha256":"7fd449028b8a9be961b1d698205d2eb2fae0acdc85f910306c2ad2afee67ede7","size":9817}
++{"mode":420,"path":"mobile/TamiyouzHRMobile/src/screens/Manager/ManagerHomeScreen.js","sha256":"c579bbd7a767c356971c08a27bf7e72eabd99419988f0c29feddc6365fa124b5","size":9925}
++{"mode":420,"path":"mobile/TamiyouzHRMobile/src/screens/Manager/TeamScreen.js","sha256":"ee03a824ef030b2fca6c65097ea3f0ab402af8664c92961c8dcc3307bee34b32","size":8151}
++{"mode":420,"path":"mobile/TamiyouzHRMobile/src/screens/Shared/AnnouncementsScreen.js","sha256":"c15ef0f5d30ef0e8395921851974ee7834dc37238af011d963bd43500fa0bc41","size":6259}
++{"mode":420,"path":"mobile/TamiyouzHRMobile/src/screens/Shared/AttendanceScreen.js","sha256":"903b30f5bfca421afced9dd650d495e1bedd44d541aef4271bc4bec0e7ef291a","size":20667}
++{"mode":420,"path":"mobile/TamiyouzHRMobile/src/screens/Shared/GoalsScreen.js","sha256":"8d6bb82ae8182b7b425ca02fe2faf1ecec4d5bd2630e516b2c9a9b8709b47b7f","size":8855}
++{"mode":420,"path":"mobile/TamiyouzHRMobile/src/screens/Shared/SettingsScreen.js","sha256":"3f6e04389cd03afc102823f610caec9847bd8040f1da8d9eae7674cb1985ae5d","size":15988}
++{"mode":420,"path":"mobile/TamiyouzHRMobile/src/screens/Shared/SupportScreen.js","sha256":"cbd967fbb6974ae56a2c6373469185ef68cb68a26e054d7674b5779fcc21868b","size":26173}
++{"mode":420,"path":"mobile/TamiyouzHRMobile/src/screens/Trainee/TraineeHomeScreen.js","sha256":"5a503dd92d680e57e9aadf3a07e41b926e33176d83a730f8043a8e46076979f3","size":6818}
++{"mode":420,"path":"mobile/TamiyouzHRMobile/src/services/announcement.service.js","sha256":"d78f7cfedb55e8102370c7c3d661b5133a5134fb494d67c03c7ef0084a2cffa1","size":262}
++{"mode":420,"path":"mobile/TamiyouzHRMobile/src/services/api.js","sha256":"70c89e477cd93084f1526dfcfa09edc3485b3f116a4cf26feb7e3d9e5ccb2e44","size":1296}
++{"mode":420,"path":"mobile/TamiyouzHRMobile/src/services/approval.service.js","sha256":"b89d17739c6bc458f0804d2b970f2b3b85e8a0b077571435f069ed14a09990ea","size":340}
++{"mode":420,"path":"mobile/TamiyouzHRMobile/src/services/attendance.service.js","sha256":"939b6291c139f05f3a76cbab2bedbfb271511b0345e67ce9b3766baf734f6817","size":1504}
++{"mode":420,"path":"mobile/TamiyouzHRMobile/src/services/auth.service.js","sha256":"877907278c1a056c6e31441f9883034a80a9bf10c68dbeaf1e7c2f5586bfbf14","size":247}
++{"mode":420,"path":"mobile/TamiyouzHRMobile/src/services/goals.service.js","sha256":"fe47a39f049a649417a2843ed47a49e3f81e4c9a1c5b5e96cfc53adb88b1f4b2","size":142}
++{"mode":420,"path":"mobile/TamiyouzHRMobile/src/services/leave.service.js","sha256":"0b2783aa232b34a340b7b4c4dff9fb7021bc68dbc4d4c2cc32056e3baac36ca3","size":576}
++{"mode":420,"path":"mobile/TamiyouzHRMobile/src/services/notification.service.js","sha256":"aa9dcc4d86a8e9b9a8853ef4d89315f47126567523a0190dc955a683a806e4b6","size":416}
++{"mode":420,"path":"mobile/TamiyouzHRMobile/src/services/payroll.service.js","sha256":"cd624df112be20dd2915f29de0469fcf10f133e22c17d2d8159da31684985e2a","size":148}
++{"mode":420,"path":"mobile/TamiyouzHRMobile/src/services/profile.service.js","sha256":"eacf15ed41c1aaac5f62a6a5ddae1e1734eb27e84d29388f216dd04af7dacc67","size":335}
++{"mode":420,"path":"mobile/TamiyouzHRMobile/src/services/storage.service.js","sha256":"7633b9fbc9c89feb74877e58d4ed947d88d0bf24634e419577655822e6789adb","size":1525}
++{"mode":420,"path":"mobile/TamiyouzHRMobile/src/services/support.service.js","sha256":"8b2858cd2ce55f6294535d3b856bee43ba8dbd46a9fbc6086bbd2c5737497863","size":1251}
++{"mode":420,"path":"mobile/TamiyouzHRMobile/src/services/team.service.js","sha256":"b162a8caee9f1d9d8e9eade61627016745a5ecb78c4c42542bd93e85d2fa7bab","size":242}
++{"mode":420,"path":"mobile/TamiyouzHRMobile/src/utils/constants.js","sha256":"a2769dd50f8d88103ec05844836618002219a98922864cc2742e9d7940e4c3e5","size":2420}
++{"mode":493,"path":"mobile/start_expo.sh","sha256":"1472fadf6d66d9e04e571edee30fd25664db321b17506a2d4aa1c9da4fe6f2e8","size":547}
++{"mode":493,"path":"scripts/baseer-v1r17-source-manifest.py","sha256":"66eb06cb8182acefaaa49b7a4a1e8226df5e754f7ab6896920266759662c222f","size":5277}
++{"mode":493,"path":"scripts/baseer-v1r18-source-manifest.py","sha256":"48ebfb9107cce52a04adb5e20587cb4028296b719db78554beea5545afc1c711","size":6065}
++{"mode":493,"path":"scripts/baseer-v1r19-source-manifest.py","sha256":"7749df430c906994d601f09a9155559ad5696e42a0417452f9148a530aaf2466","size":4072}
++{"mode":493,"path":"scripts/baseer-v1r20-runtime-manifest.py","sha256":"99f4adeb34d57dd43e42a089bd08d8268e2bace1ccdee8cbbd5ec0d6557d5e09","size":4074}
++{"mode":493,"path":"scripts/baseer-v1r21-runtime-manifest.py","sha256":"57a93d1dc3f4c6eb9c21ff59a73b77d41001a883da7770cd7295574fdc5a3860","size":4334}
++{"mode":493,"path":"scripts/baseer-v1r22-source-manifest.py","sha256":"7ab7b16ead1baf4945efcec95562063c84a0876142d58cbce3a0bfe81bb8bb8a","size":2349}
++{"mode":493,"path":"scripts/test-baseer-v1r16-deploy.sh","sha256":"b3b3b9605dd8e5b3c13eda75bb0bdebc89c0e668ecf6243ab16431973179110c","size":2429}
++{"mode":493,"path":"scripts/test-baseer-v1r17-auto-rollback.sh","sha256":"a326f06e5e6288bac0b5c3520ae47fe8e618d7ed316f37fd2f52b3b1933297bf","size":2850}
++{"mode":493,"path":"scripts/test-baseer-v1r17-deploy.sh","sha256":"a367d340eb8eef62245c301ad0b00cf560a96a96e80a4f80532e617d216b9f70","size":4077}
++{"mode":493,"path":"scripts/test-baseer-v1r17-e2e.sh","sha256":"34e9750e1298f011ea54bb69ab1c0b503766ba4bfd996fa58228a7d02aad9751","size":3300}
++{"mode":493,"path":"scripts/test-baseer-v1r18-auto-rollback.sh","sha256":"1884b7c655b93432f0f88dbc9d817f7c9e58f88365cb67fd7c4701067d636930","size":3028}
++{"mode":493,"path":"scripts/test-baseer-v1r18-deploy.sh","sha256":"fd6b7e7ae1eee5cd2e035ecdee75597bb3932f16307a871177b12737e46fed11","size":3638}
++{"mode":493,"path":"scripts/test-baseer-v1r18-e2e.sh","sha256":"2aaff0981929f39b57cd6ec6538cf25755f5e09b9863fdb3b106d1ab32a7b5c5","size":3857}
+diff --git a/ROLLBACK-THRS-BASEER-V1R22-FULL-SOURCE.sh b/ROLLBACK-THRS-BASEER-V1R22-FULL-SOURCE.sh
+index 0e5d151..7a59792 100755
+--- a/ROLLBACK-THRS-BASEER-V1R22-FULL-SOURCE.sh
++++ b/ROLLBACK-THRS-BASEER-V1R22-FULL-SOURCE.sh
+@@ -14,9 +14,13 @@ libc=ctypes.CDLL(None,use_errno=True);f=getattr(libc,'renameat2',None);n={'x86_6
+ if x!=0:raise OSError(ctypes.get_errno(),os.strerror(ctypes.get_errno()))
+ PY
+ }
+-verify_uploads(){ [[ ! -e "$1" ]]&&return 0;python3 - "$1" <<'PY'
++verify_uploads(){ [[ ! -e "$1" && ! -L "$1" ]]&&return 0;python3 - "$1" <<'PY'
+ import os,stat,sys
+-for c,d,f in os.walk(os.path.realpath(sys.argv[1]),followlinks=False):
++root=sys.argv[1]
++info=os.lstat(root)
++if stat.S_ISLNK(info.st_mode) or not stat.S_ISDIR(info.st_mode):raise SystemExit(f'uploads root must be a real directory: {root}')
++root=os.path.realpath(root)
++for c,d,f in os.walk(root,followlinks=False):
+  for n in list(d)+list(f):
+   p=os.path.join(c,n);i=os.lstat(p)
+   if stat.S_ISLNK(i.st_mode) or not(stat.S_ISDIR(i.st_mode) or stat.S_ISREG(i.st_mode)):raise SystemExit(f'unsafe uploads entry: {p}')
+diff --git a/ROLLBACK-THRS-BASEER-V1R23-FULL-SOURCE.sh b/ROLLBACK-THRS-BASEER-V1R23-FULL-SOURCE.sh
+new file mode 100755
+index 0000000..e1f7cba
+--- /dev/null
++++ b/ROLLBACK-THRS-BASEER-V1R23-FULL-SOURCE.sh
+@@ -0,0 +1,45 @@
++#!/usr/bin/env bash
++set -Eeuo pipefail
++TARGET="${1:-}"; PREVIOUS_RELEASE="${2:-}"; STATE_DIR="${3:-}"; HEALTH_URL="${BASEER_HEALTHCHECK_URL:-${4:-}}"; PM2_NAMES="${BASEER_PM2_NAMES:-thrs-backend baseer-worker}"
++[[ -d "$TARGET" && -d "$PREVIOUS_RELEASE" && -d "$STATE_DIR" && -n "$HEALTH_URL" ]]||{ echo "Usage: $0 TARGET PREVIOUS_RELEASE STATE_DIR HEALTH_URL" >&2;exit 2; }
++for c in sha256sum python3 flock rsync pm2 curl node realpath cp stat;do command -v "$c" >/dev/null 2>&1||{ echo "Missing command: $c" >&2;exit 2;};done
++TARGET="$(realpath "$TARGET")";PREVIOUS_RELEASE="$(realpath "$PREVIOUS_RELEASE")";STATE_DIR="$(realpath "$STATE_DIR")";PARENT="$(dirname "$TARGET")";NAME="$(basename "$TARGET")";LOCK="$PARENT/.${NAME}-v1r23.lock"
++PREVIOUS_MANIFEST="$STATE_DIR/previous-release.manifest.jsonl";CURRENT_MANIFEST="$STATE_DIR/current-release.manifest.jsonl";MANIFEST_TOOL="$STATE_DIR/baseer-v1r21-runtime-manifest.py";STATE_CHECKSUMS="$STATE_DIR/STATE-CHECKSUMS.sha256"
++[[ "$(dirname "$PREVIOUS_RELEASE")" == "$PARENT" && "$PREVIOUS_RELEASE" != "$TARGET" ]]||exit 3
++atomic_exchange(){ python3 - "$1" "$2" <<'PY'
++import ctypes,os,platform,sys
++l=os.fsencode(os.path.abspath(sys.argv[1]));r=os.fsencode(os.path.abspath(sys.argv[2]));
++if os.stat(l).st_dev!=os.stat(r).st_dev:raise SystemExit('atomic exchange requires same filesystem')
++libc=ctypes.CDLL(None,use_errno=True);f=getattr(libc,'renameat2',None);n={'x86_64':316,'aarch64':276}.get(platform.machine());x=f(-100,l,-100,r,2) if f else libc.syscall(n,-100,l,-100,r,2)
++if x!=0:raise OSError(ctypes.get_errno(),os.strerror(ctypes.get_errno()))
++PY
++}
++verify_uploads(){ [[ ! -e "$1" && ! -L "$1" ]]&&return 0;python3 - "$1" <<'PY'
++import os,stat,sys
++root=sys.argv[1]
++info=os.lstat(root)
++if stat.S_ISLNK(info.st_mode) or not stat.S_ISDIR(info.st_mode):raise SystemExit(f'uploads root must be a real directory: {root}')
++root=os.path.realpath(root)
++for c,d,f in os.walk(root,followlinks=False):
++ for n in list(d)+list(f):
++  p=os.path.join(c,n);i=os.lstat(p)
++  if stat.S_ISLNK(i.st_mode) or not(stat.S_ISDIR(i.st_mode) or stat.S_ISREG(i.st_mode)):raise SystemExit(f'unsafe uploads entry: {p}')
++  if stat.S_ISREG(i.st_mode) and i.st_nlink!=1:raise SystemExit(f'hard-linked uploads file: {p}')
++PY
++}
++copy_env(){ local src="$1" dst="$2";[[ ! -e "$src" ]]&&return 0;[[ -f "$src" && ! -L "$src" && "$(stat -c %h "$src")" == 1 ]]||return 1;rm -f "$dst";cp -p --no-dereference "$src" "$dst"; }
++cleanup(){ local r="$1";[[ -f "$r/backend/scripts/baseer-runner-cleanup.js" ]]&&(cd "$r/backend"&&node scripts/baseer-runner-cleanup.js)||true; }
++verify_pm2(){ local s;s="$(mktemp)";pm2 jlist>"$s";node - "$s" "$PM2_NAMES" "$TARGET" <<'NODE'
++const fs=require('fs'),path=require('path'),rows=JSON.parse(fs.readFileSync(process.argv[2],'utf8')),names=process.argv[3].trim().split(/\s+/),target=fs.realpathSync.native(process.argv[4]);const inside=v=>{if(!v)return false;try{const r=fs.realpathSync.native(v);return r===target||r.startsWith(target+path.sep)}catch{return false}};for(const n of names){const x=rows.find(r=>r.name===n);if(!x)throw Error(`missing ${n}`);const e=x.pm2_env||{};if(e.status!=='online'||Number(x.pid)<=0||!inside(e.pm_cwd||e.cwd)||!inside(e.pm_exec_path))throw Error(`invalid PM2 ${n}`)}
++NODE
++rm -f "$s"; }
++restart_verify(){ local probe="${1:-false}";for p in $PM2_NAMES;do pm2 restart "$p" --update-env >/dev/null;done;sleep "${BASEER_STABILITY_SECONDS:-8}";verify_pm2;curl --fail --silent --show-error --retry 5 --retry-delay 2 --max-time 20 "$HEALTH_URL">/dev/null;if [[ "$probe" == true ]];then(cd "$TARGET/backend"&&npm run baseer:verify-worker-live-v1r23);fi; }
++exec 9>"$LOCK";flock -n 9||exit 3;(cd "$STATE_DIR"&&sha256sum -c "$(basename "$STATE_CHECKSUMS")">/dev/null);python3 "$MANIFEST_TOOL" verify-runtime "$TARGET" "$CURRENT_MANIFEST";python3 "$MANIFEST_TOOL" verify-runtime "$PREVIOUS_RELEASE" "$PREVIOUS_MANIFEST";verify_pm2
++# Carry forward the latest runtime configuration without trusting symlinks or hard links.
++copy_env "$TARGET/backend/.env" "$PREVIOUS_RELEASE/backend/.env";copy_env "$TARGET/frontend/.env" "$PREVIOUS_RELEASE/frontend/.env";verify_uploads "$TARGET/backend/uploads"
++for p in $PM2_NAMES;do pm2 stop "$p">/dev/null;done;cleanup "$TARGET";python3 "$MANIFEST_TOOL" verify-runtime "$TARGET" "$CURRENT_MANIFEST";python3 "$MANIFEST_TOOL" verify-runtime "$PREVIOUS_RELEASE" "$PREVIOUS_MANIFEST"
++if [[ -d "$TARGET/backend/uploads" ]];then mkdir -p "$PREVIOUS_RELEASE/backend/uploads";rsync -a --delete "$TARGET/backend/uploads/" "$PREVIOUS_RELEASE/backend/uploads/";fi;verify_uploads "$PREVIOUS_RELEASE/backend/uploads";atomic_exchange "$TARGET" "$PREVIOUS_RELEASE"
++if ! restart_verify false;then
++ for p in $PM2_NAMES;do pm2 stop "$p">/dev/null 2>&1||true;done;cleanup "$TARGET";python3 "$MANIFEST_TOOL" verify-runtime "$PREVIOUS_RELEASE" "$CURRENT_MANIFEST";atomic_exchange "$TARGET" "$PREVIOUS_RELEASE";restart_verify true||{ echo "CRITICAL: rollback and V1R23 recovery failed." >&2;exit 91;};echo "Rollback failed; verified V1R23 recovered." >&2;exit 90
++fi
++echo "BASEER_V1R23_FULL_SOURCE_ROLLBACK_OK"
+diff --git a/backend/package.json b/backend/package.json
+index 2090b1f..5249f2a 100644
+--- a/backend/package.json
++++ b/backend/package.json
+@@ -15,7 +15,7 @@
+     "check:syntax": "find src scripts prisma test -type f -name '*.js' -print0 | xargs -0 -n1 node --check && node --check server.js",
+     "verify": "npm run check:syntax && npm run lint && npm test",
+     "test:postgres": "node scripts/verify-v5-postgres.js",
+-    "verify:staging": "npm run verify && npm run baseer:verify-v1r18 && npm run baseer:verify-v1r19 && npm run baseer:verify-v1r20 && npm run baseer:verify-v1r21 && npm run baseer:verify-v1r22 && npm run baseer:verify-schema-v1r18 && npm run baseer:verify-schema-v1r19 && npm run baseer:verify-schema-v1r20 && npm run baseer:verify-schema-v1r21 && npm run baseer:verify-schema-v1r22 && npm run prisma:generate && npm run prisma:migrate && npm run baseer:verify-postgres-v1r18 && npm run baseer:verify-postgres-v1r20 && npm run test:postgres && npm run test:api-postgres",
++    "verify:staging": "npm run verify && npm run baseer:verify-v1r18 && npm run baseer:verify-v1r19 && npm run baseer:verify-v1r20 && npm run baseer:verify-v1r21 && npm run baseer:verify-v1r22 && npm run baseer:verify-v1r23 && npm run baseer:verify-schema-v1r18 && npm run baseer:verify-schema-v1r19 && npm run baseer:verify-schema-v1r20 && npm run baseer:verify-schema-v1r21 && npm run baseer:verify-schema-v1r22 && npm run baseer:verify-schema-v1r23 && npm run prisma:generate && npm run prisma:migrate && npm run baseer:verify-postgres-v1r18 && npm run baseer:verify-postgres-v1r20 && npm run test:postgres && npm run test:api-postgres",
+     "test:api-postgres": "node scripts/verify-v5-api-postgres.js",
+     "baseer:worker": "node scripts/baseer-worker.js",
+     "baseer:seed-permissions-v1r18": "node scripts/seed-baseer-v1r18-permissions.js",
+@@ -31,7 +31,10 @@
+     "baseer:verify-schema-v1r21": "node scripts/verify-baseer-v1r21-schema.js",
+     "baseer:verify-v1r22": "node --test test/baseer-v1r22-unit.test.js test/baseer-v1r22-contract.test.js test/baseer-v1r22-deploy-e2e.test.js",
+     "baseer:verify-schema-v1r22": "node scripts/verify-baseer-v1r22-schema.js",
+-    "baseer:verify-worker-live-v1r22": "node scripts/verify-baseer-worker-live-v1r22.js"
++    "baseer:verify-worker-live-v1r22": "node scripts/verify-baseer-worker-live-v1r22.js",
++    "baseer:verify-v1r23": "node --test test/baseer-v1r23-unit.test.js test/baseer-v1r23-contract.test.js test/baseer-v1r23-deploy.test.js test/baseer-v1r23-deploy-e2e.test.js",
++    "baseer:verify-schema-v1r23": "node scripts/verify-baseer-v1r23-schema.js",
++    "baseer:verify-worker-live-v1r23": "node scripts/verify-baseer-worker-live-v1r23.js"
+   },
+   "dependencies": {
+     "@prisma/client": "^5.0.0",
+diff --git a/backend/scripts/baseer-worker.js b/backend/scripts/baseer-worker.js
+index 56fb607..f115295 100644
+--- a/backend/scripts/baseer-worker.js
++++ b/backend/scripts/baseer-worker.js
+@@ -9,7 +9,22 @@ const {enabled}=require('../src/services/baseer/feature-state.service');
+ const {positiveMilliseconds,cleanupOrphanedRunners,killAllRegisteredRunners}=require('../src/services/baseer/worker-isolation');
+ const INTERVAL=positiveMilliseconds(process.env.BASEER_WORKER_POLL_MS,3000);
+ let stopping=false;
+-async function tick(){if(stopping)return;if(!enabled()){for(let i=0;i<3;i+=1){const result=await processOneJob({healthOnly:true});if(result===null)break;}return;}await recoverExpiredJobs();for(let i=0;i<10;i+=1){const result=await processOneJob();if(result===null)break;}await sendDueReminders(100);await purgeExpiredNonces();await purgeExpiredRateLimits();}
+-async function main(){const cleanup=cleanupOrphanedRunners();console.log(`Baseer worker V1R22 started; orphan cleanup killed=${cleanup.killed} stale=${cleanup.stale}`);while(!stopping){try{await tick();}catch(error){console.error('Baseer worker tick failed:',error?.message||error);}if(!stopping)await new Promise((resolve)=>setTimeout(resolve,INTERVAL));}killAllRegisteredRunners();await prisma.$disconnect();}
+-for(const signal of ['SIGINT','SIGTERM'])process.on(signal,()=>{stopping=true;markWorkerShuttingDown();killAllRegisteredRunners();});
+-main().catch((error)=>{markWorkerShuttingDown();killAllRegisteredRunners();console.error(error);process.exit(1);});
++async function tick(){
++  if(stopping)return;
++  if(!enabled()){
++    for(let i=0;i<3&&!stopping;i+=1){const result=await processOneJob({healthOnly:true});if(result===null)break;}
++    return;
++  }
++  await recoverExpiredJobs();
++  for(let i=0;i<10&&!stopping;i+=1){const result=await processOneJob();if(result===null)break;}
++  if(stopping)return;
++  await sendDueReminders(100);
++  if(stopping)return;
++  await purgeExpiredNonces();
++  if(stopping)return;
++  await purgeExpiredRateLimits();
++}
++async function main(){const cleanup=cleanupOrphanedRunners();console.log(`Baseer worker V1R23 started; orphan cleanup killed=${cleanup.killed} stale=${cleanup.stale}`);while(!stopping){try{await tick();}catch(error){console.error('Baseer worker tick failed:',error?.message||error);}if(!stopping)await new Promise((resolve)=>setTimeout(resolve,INTERVAL));}killAllRegisteredRunners();await prisma.$disconnect();}
++function stop(){if(stopping)return;stopping=true;markWorkerShuttingDown();killAllRegisteredRunners();}
++for(const signal of ['SIGINT','SIGTERM'])process.on(signal,stop);
++main().catch((error)=>{stop();console.error(error);process.exit(1);});
+diff --git a/backend/scripts/verify-baseer-v1r23-schema.js b/backend/scripts/verify-baseer-v1r23-schema.js
+new file mode 100644
+index 0000000..a0633a3
+--- /dev/null
++++ b/backend/scripts/verify-baseer-v1r23-schema.js
+@@ -0,0 +1,17 @@
++'use strict';
++const fs=require('fs');const path=require('path');
++const backend=path.join(__dirname,'..');const root=path.join(backend,'..');
++const required=[
++ 'backend/prisma/rollback/20260724170000_baseer_v1r19_corrective.rollback.sql',
++ 'BASELINE-THRS-BASEER-V1R22-SOURCE-MANIFEST.jsonl',
++ 'APPLY-THRS-BASEER-V1R23-FULL-SOURCE.sh',
++ 'ROLLBACK-THRS-BASEER-V1R23-FULL-SOURCE.sh',
++ 'scripts/baseer-v1r23-source-manifest.py',
++ 'backend/scripts/verify-baseer-worker-live-v1r23.js',
++ 'backend/src/services/baseer/voice-state-machine.js',
++ 'backend/src/services/baseer/public-input.js'
++];
++const missing=required.filter((item)=>!fs.existsSync(path.join(root,item)));
++const baseline=fs.readFileSync(path.join(root,'BASELINE-THRS-BASEER-V1R22-SOURCE-MANIFEST.jsonl'),'utf8');
++if(!baseline.includes('backend/prisma/rollback/20260724170000_baseer_v1r19_corrective.rollback.sql'))missing.push('V1R19 rollback is missing from the V1R22 baseline manifest');
++if(missing.length){console.error('Baseer V1R23 verification FAILED');missing.forEach((x)=>console.error(`- ${x}`));process.exit(1);}console.log('Baseer V1R23 verification PASS.');
+diff --git a/backend/scripts/verify-baseer-worker-live-v1r23.js b/backend/scripts/verify-baseer-worker-live-v1r23.js
+new file mode 100755
+index 0000000..1f58d0c
+--- /dev/null
++++ b/backend/scripts/verify-baseer-worker-live-v1r23.js
+@@ -0,0 +1,26 @@
++'use strict';
++require('dotenv').config();
++const crypto = require('crypto');
++const prisma = require('../src/config/database');
++const { positiveMilliseconds } = require('../src/services/baseer/worker-isolation');
++const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
++async function main() {
++  const timeoutMs = Math.min(120000, positiveMilliseconds(process.env.BASEER_WORKER_LIVENESS_TIMEOUT_MS, 30000));
++  const nonce=crypto.randomUUID();
++  const ack=`BASEER_WORKER_V1R23_ACK:${nonce}`;
++  const job = await prisma.baseerJob.create({ data: { jobType: 'WORKER_HEALTH_PROBE_V1R23', payload: { nonce, workerVersion:'V1R23', requestedAt: new Date().toISOString() }, maxAttempts: 1, runAt: new Date() } });
++  const deadline = Date.now() + timeoutMs;
++  try {
++    while (Date.now() < deadline) {
++      const current = await prisma.baseerJob.findUnique({ where: { id: job.id }, select: { status: true, lastError: true } });
++      if (current?.status === 'SUCCEEDED' && current.lastError === ack) { console.log(`BASEER_V1R23_WORKER_LIVENESS_PASS job=${job.id}`); return; }
++      if (current?.status === 'SUCCEEDED') throw new Error('A non-V1R23 worker consumed the health probe without the required acknowledgement.');
++      if (['FAILED', 'UNKNOWN'].includes(current?.status)) throw new Error(`Worker health probe ${current.status}: ${current.lastError || 'unknown error'}`);
++      await wait(500);
++    }
++    throw new Error(`Baseer V1R23 worker did not acknowledge the health probe within ${timeoutMs}ms.`);
++  } finally {
++    await prisma.baseerJob.deleteMany({ where: { id: job.id } }).catch(() => null);
++  }
++}
++main().catch((error) => { console.error(error); process.exitCode = 1; }).finally(() => prisma.$disconnect());
+diff --git a/backend/src/app.js b/backend/src/app.js
+index 7c4d296..87a2ba8 100644
+--- a/backend/src/app.js
++++ b/backend/src/app.js
+@@ -112,8 +112,8 @@ app.get('/api/health', (req, res) => {
+   res.json({
+     success: true,
+     message: 'Tamiyouz HR API is running',
+-    version: '1.22.0',
+-    baseer: 'V1R22',
++    version: '1.23.0',
++    baseer: 'V1R23',
+     timestamp: new Date().toISOString()
+   });
+ });
+diff --git a/backend/src/controllers/baseer-public.controller.js b/backend/src/controllers/baseer-public.controller.js
+index f20c0a0..aadec25 100644
+--- a/backend/src/controllers/baseer-public.controller.js
++++ b/backend/src/controllers/baseer-public.controller.js
+@@ -3,6 +3,7 @@ const recruitment = require('../services/baseer/recruitment.service');
+ const voice = require('../services/baseer/voice.service');
+ const { consumeCandidateSession } = require('../services/baseer/rate-limit');
+ const { asBaseerError } = require('../services/baseer/errors');
++const { optionalBoolean } = require('../services/baseer/public-input');
+ function err(res, error) { const e = asBaseerError(error); res.status(e.statusCode || 500).json({ success: false, code: e.code, message: e.message }); }
+ async function session(req) {
+   const row = await recruitment.resolveCandidateToken(req.params.sessionId, req.get('X-Baseer-Candidate-Token'));
+@@ -11,7 +12,7 @@ async function session(req) {
+ }
+ exports.bootstrap = async (req, res) => { try { const bootstrapToken = req.get('X-Baseer-Bootstrap-Token'); const valid = await recruitment.validateBootstrapCandidateSession(req.params.sessionId, bootstrapToken); await consumeCandidateSession(valid); const tokens = await recruitment.bootstrapCandidateSession(req.params.sessionId, bootstrapToken); res.json({ success: true, tokens }); } catch (e) { err(res, e); } };
+ exports.getSession = async (req, res) => { try { const row = await session(req); res.json({ success: true, session: { id: row.id, applicationId: row.applicationId, status: row.status, consentInterview: Boolean(row.consentInterviewAt), consentRecording: Boolean(row.consentRecordingAt), expiresAt: row.expiresAt, questions: recruitment.candidateQuestions(row), answeredQuestionIds: (row.artifacts || []).map((artifact) => artifact.questionId).filter(Boolean) } }); } catch (e) { err(res, e); } };
+-exports.consent = async (req, res) => { try { const row = await session(req); const updated = await recruitment.consent({ session: row, interview: Object.prototype.hasOwnProperty.call(req.body || {}, 'interview') ? Boolean(req.body.interview) : undefined, recording: Object.prototype.hasOwnProperty.call(req.body || {}, 'recording') ? Boolean(req.body.recording) : undefined }); res.json({ success: true, consentInterview: Boolean(updated.consentInterviewAt), consentRecording: Boolean(updated.consentRecordingAt), voiceRevocation: updated.voiceRevocation }); } catch (e) { err(res, e); } };
++exports.consent = async (req, res) => { try { const row = await session(req); const updated = await recruitment.consent({ session: row, interview: optionalBoolean(req.body, 'interview'), recording: optionalBoolean(req.body, 'recording') }); res.json({ success: true, consentInterview: Boolean(updated.consentInterviewAt), consentRecording: Boolean(updated.consentRecordingAt), voiceRevocation: updated.voiceRevocation }); } catch (e) { err(res, e); } };
+ exports.answer = async (req, res) => { try { const row = await session(req); const artifact = await recruitment.submitCandidateAnswer({ session: row, input: req.body || {} }); res.status(201).json({ success: true, artifactId: artifact.id }); } catch (e) { err(res, e); } };
+ exports.refresh = async (req, res) => { try { const refreshToken = req.get('X-Baseer-Refresh-Token'); const valid = await recruitment.validateRefreshCandidateSession(req.params.sessionId, refreshToken); await consumeCandidateSession(valid); const tokens = await recruitment.refreshCandidateSession(req.params.sessionId, refreshToken); res.json({ success: true, tokens }); } catch (e) { err(res, e); } };
+ exports.voice = async (req, res) => { try { const row = await session(req); res.status(201).json({ success: true, voice: await voice.createVoiceSession({ candidateSession: row, input: req.body || {} }) }); } catch (e) { err(res, e); } };
+diff --git a/backend/src/controllers/baseer.controller.js b/backend/src/controllers/baseer.controller.js
+index cb52464..eaebfc5 100644
+--- a/backend/src/controllers/baseer.controller.js
++++ b/backend/src/controllers/baseer.controller.js
+@@ -7,7 +7,7 @@ const actions=require('../services/baseer/action.service');
+ const {buildScopeSnapshot}=require('../services/baseer/scope');
+ const {asBaseerError}=require('../services/baseer/errors');
+ function sendError(res,error){const e=asBaseerError(error);return res.status(e.statusCode||500).json({success:false,code:e.code,message:e.message,details:e.details||undefined});}
+-exports.bootstrap=async(req,res)=>{try{const [conversations,pending]=await Promise.all([prisma.agentConversation.findMany({where:{userId:req.user.id},orderBy:{updatedAt:'desc'},take:30}),actions.listActions({user:req.user,status:'PENDING_APPROVAL'})]);res.json({success:true,product:{name:'بصير',version:'V1R22',modes:['EXECUTIVE','KNOWLEDGE','TALENT','RECRUITMENT','ONBOARDING'],scope:buildScopeSnapshot(req.user)},tools:registry.list(),conversations,pendingActions:pending});}catch(e){sendError(res,e);}};
++exports.bootstrap=async(req,res)=>{try{const [conversations,pending]=await Promise.all([prisma.agentConversation.findMany({where:{userId:req.user.id},orderBy:{updatedAt:'desc'},take:30}),actions.listActions({user:req.user,status:'PENDING_APPROVAL'})]);res.json({success:true,product:{name:'بصير',version:'V1R23',modes:['EXECUTIVE','KNOWLEDGE','TALENT','RECRUITMENT','ONBOARDING'],scope:buildScopeSnapshot(req.user)},tools:registry.list(),conversations,pendingActions:pending});}catch(e){sendError(res,e);}};
+ exports.listConversations=async(req,res)=>{try{const conversations=await prisma.agentConversation.findMany({where:{userId:req.user.id},orderBy:{updatedAt:'desc'},take:100});res.json({success:true,conversations});}catch(e){sendError(res,e);}};
+ exports.getConversation=async(req,res)=>{try{const conversation=await prisma.agentConversation.findFirst({where:{id:req.params.id,userId:req.user.id},include:{messages:{orderBy:{createdAt:'asc'}}}});if(!conversation)return res.status(404).json({success:false,message:'Conversation not found'});res.json({success:true,conversation});}catch(e){sendError(res,e);}};
+ exports.chat=async(req,res)=>{try{const message=String(req.body.message||'').trim();if(!message)return res.status(400).json({success:false,message:'Message is required'});let conversation=null;if(req.body.conversationId)conversation=await prisma.agentConversation.findFirst({where:{id:req.body.conversationId,userId:req.user.id}});if(!conversation)conversation=await prisma.agentConversation.create({data:{userId:req.user.id,email:req.user.email,title:message.slice(0,80),mode:req.body.mode||'EXECUTIVE',scopeSnapshot:buildScopeSnapshot(req.user),traceId:crypto.randomUUID()}});await prisma.agentMessage.create({data:{conversationId:conversation.id,role:'user',content:message}});let toolName=req.body.toolName||null;let input=req.body.input||{};if(!toolName){const planned=await orchestrator.plan({message,mode:req.body.mode||conversation.mode});toolName=planned.toolName;if(!input||!Object.keys(input).length)input=planned.input||{};}const output=await orchestrator.run({user:req.user,conversationId:conversation.id,toolName,input,idempotencyKey:req.get('Idempotency-Key')||req.body.idempotencyKey,mode:req.body.mode||conversation.mode,message});let content='تم إنشاء طلب اعتماد ولن يتم التنفيذ قبل موافقة مستخدم مخوّل.';if(output.kind!=='approval'){const citations=output.result?.citations||[];content=await orchestrator.synthesize({userMessage:message,toolName,result:output.result,citations})||JSON.stringify(output.result,null,2);}const assistant=await prisma.agentMessage.create({data:{conversationId:conversation.id,role:'assistant',content,toolName,toolInput:input,toolOutput:output,meta:{traceId:output.traceId}}});await prisma.agentConversation.update({where:{id:conversation.id},data:{updatedAt:new Date(),lastIntent:assistant.toolName,mode:req.body.mode||conversation.mode}});res.status(output.kind==='approval'?202:200).json({success:true,conversationId:conversation.id,message:assistant,output});}catch(e){sendError(res,e);}};
+@@ -15,4 +15,4 @@ exports.runTool=async(req,res)=>{try{const output=await orchestrator.run({user:r
+ exports.listActions=async(req,res)=>{try{res.json({success:true,actions:await actions.listActions({user:req.user,status:req.query.status})});}catch(e){sendError(res,e);}};
+ exports.approveAction=async(req,res)=>{try{res.json({success:true,result:await actions.approveAction({actionId:req.params.id,user:req.user})});}catch(e){sendError(res,e);}};
+ exports.rejectAction=async(req,res)=>{try{res.json({success:true,result:await actions.rejectAction({actionId:req.params.id,user:req.user,notes:req.body.notes})});}catch(e){sendError(res,e);}};
+-exports.status=async(req,res)=>{try{const counts=await Promise.all([prisma.baseerJob.count({where:{status:'PENDING'}}),prisma.agentActionLog.count({where:{status:'PENDING_APPROVAL'}}),prisma.baseerExecution.count({where:{status:'RUNNING'}})]);res.json({success:true,version:'V1R22',enabled:process.env.BASEER_ENABLED!=='false',jobsPending:counts[0],approvalsPending:counts[1],executionsRunning:counts[2]});}catch(e){sendError(res,e);}};
++exports.status=async(req,res)=>{try{const counts=await Promise.all([prisma.baseerJob.count({where:{status:'PENDING'}}),prisma.agentActionLog.count({where:{status:'PENDING_APPROVAL'}}),prisma.baseerExecution.count({where:{status:'RUNNING'}})]);res.json({success:true,version:'V1R23',enabled:process.env.BASEER_ENABLED!=='false',jobsPending:counts[0],approvalsPending:counts[1],executionsRunning:counts[2]});}catch(e){sendError(res,e);}};
+diff --git a/backend/src/services/baseer/job-retry-policy.js b/backend/src/services/baseer/job-retry-policy.js
+index d8774ff..153c0ec 100644
+--- a/backend/src/services/baseer/job-retry-policy.js
++++ b/backend/src/services/baseer/job-retry-policy.js
+@@ -1,8 +1,8 @@
+ 'use strict';
+ function retryDelay(attempts){return Math.min(60000,1000*2**Math.min(Number(attempts)||0,10));}
+-function jobFailureStatus({jobType,attempts,maxAttempts,timeout}){
++function jobFailureStatus({jobType,attempts,maxAttempts,timeout,uncertain}){
+   if(jobType==='TERMINATE_VOICE_ROOM')return attempts<maxAttempts?'PENDING':'FAILED';
+-  if(timeout)return 'UNKNOWN';
++  if(uncertain||timeout||jobType==='EXECUTE_APPROVED_ACTION')return 'UNKNOWN';
+   return attempts>=maxAttempts?'FAILED':'PENDING';
+ }
+ module.exports={retryDelay,jobFailureStatus};
+diff --git a/backend/src/services/baseer/jobs.service.js b/backend/src/services/baseer/jobs.service.js
+index 69c1602..044ecd2 100644
+--- a/backend/src/services/baseer/jobs.service.js
++++ b/backend/src/services/baseer/jobs.service.js
+@@ -14,6 +14,7 @@ const {workerTimeoutMs,hardWorkerTimeoutMs,killProcessTree,registerRunner,unregi
+ const {retryDelay,jobFailureStatus}=require('./job-retry-policy');
+ let workerShuttingDown=false;
+ function markWorkerShuttingDown(){workerShuttingDown=true;}
++function isWorkerShuttingDown(){return workerShuttingDown;}
+ 
+ async function executeApprovedAction(action, options = {}) {
+   const tool=registry.get(action.toolName);
+@@ -78,39 +79,52 @@ async function executeApprovedActionIsolated(action, jobId) {
+ }
+ 
+ async function processOneJob({ healthOnly = false } = {}) {
++  if (workerShuttingDown) return null;
+   const now=new Date(),leaseToken=crypto.randomUUID(),leaseUntil=new Date(Date.now()+10*60*1000);
+-  const candidates=await prisma.baseerJob.findMany({where:{status:'PENDING',runAt:{lte:now},...(healthOnly?{jobType:'WORKER_HEALTH_PROBE'}:{})},orderBy:{runAt:'asc'},take:5});
++  const candidates=await prisma.baseerJob.findMany({where:{status:'PENDING',runAt:{lte:now},...(healthOnly?{jobType:'WORKER_HEALTH_PROBE_V1R23'}:{})},orderBy:{runAt:'asc'},take:5});
+   for(const candidate of candidates){
++    if (workerShuttingDown) return null;
+     const claimed=await prisma.baseerJob.updateMany({where:{id:candidate.id,status:'PENDING'},data:{status:'RUNNING',leaseToken,leaseUntil,attempts:{increment:1}}});
+     if(!claimed.count)continue;
++    if(workerShuttingDown){await prisma.baseerJob.updateMany({where:{id:candidate.id,status:'RUNNING',leaseToken},data:{status:'PENDING',leaseToken:null,leaseUntil:null,runAt:new Date()}});return null;}
++    let actionTransitioned=false;
+     try{
+       if(candidate.jobType==='EXECUTE_APPROVED_ACTION'){
+         const action=await prisma.agentActionLog.findUnique({where:{id:candidate.actionId||candidate.payload.actionId}});
+         if(!action||action.status!=='APPROVED')throw new Error('Approved action is unavailable');
+         const transition=await prisma.agentActionLog.updateMany({where:{id:action.id,status:'APPROVED'},data:{status:'EXECUTING'}});
+         if(!transition.count)throw new Error('Action transition conflict');
++        actionTransitioned=true;
+         const heartbeat=setInterval(()=>prisma.baseerJob.updateMany({where:{id:candidate.id,status:'RUNNING',leaseToken},data:{leaseUntil:new Date(Date.now()+10*60*1000)}}).catch(()=>null),30000);heartbeat.unref?.();
+         let actionResult;
+         try{actionResult=await executeApprovedActionIsolated({...action,status:'EXECUTING'},candidate.id);}finally{clearInterval(heartbeat);}
+-        await prisma.agentActionLog.updateMany({where:{id:action.id,status:'EXECUTING'},data:{status:'EXECUTED',result:actionResult,executedAt:new Date()}});
++        const persisted=await prisma.agentActionLog.updateMany({where:{id:action.id,status:'EXECUTING'},data:{status:'EXECUTED',result:actionResult,executedAt:new Date(),errorCode:null}});
++        if(!persisted.count)throw new BaseerError('BASEER_ACTION_RESULT_PERSIST_CONFLICT','The action completed but its result could not be persisted safely.',409);
+       } else if(candidate.jobType==='TERMINATE_VOICE_ROOM'){
+         await voice.terminateVoiceRoomJob(candidate.payload);
+-      } else if(candidate.jobType==='WORKER_HEALTH_PROBE'){
+-        if(!candidate.payload?.nonce)throw new BaseerError('WORKER_HEALTH_PROBE_INVALID','Worker health probe nonce is required.',400);
++      } else if(candidate.jobType==='WORKER_HEALTH_PROBE_V1R23'){
++        const nonce=String(candidate.payload?.nonce||'');
++        if(nonce.length<16||candidate.payload?.workerVersion!=='V1R23')throw new BaseerError('WORKER_HEALTH_PROBE_INVALID','V1R23 worker health probe payload is invalid.',400);
++      } else {
++        throw new BaseerError('BASEER_JOB_TYPE_UNKNOWN',`Unknown Baseer job type: ${candidate.jobType}`,400);
+       }
+-      await prisma.baseerJob.update({where:{id:candidate.id},data:{status:'SUCCEEDED',leaseToken:null,leaseUntil:null,lastError:null}});return true;
++      const successMarker=candidate.jobType==='WORKER_HEALTH_PROBE_V1R23'?`BASEER_WORKER_V1R23_ACK:${candidate.payload.nonce}`:null;
++      await prisma.baseerJob.update({where:{id:candidate.id},data:{status:'SUCCEEDED',leaseToken:null,leaseUntil:null,lastError:successMarker}});return true;
+     }catch(error){
+       const timeout=['BASEER_TOOL_TIMEOUT','BASEER_WORKER_HARD_TIMEOUT','BASEER_WORKER_SHUTDOWN'].includes(error?.code);
++      const uncertain=Boolean(actionTransitioned&&candidate.jobType==='EXECUTE_APPROVED_ACTION');
+       const attempts=candidate.attempts+1;
+       const terminal=attempts>=candidate.maxAttempts;
+-      const status=jobFailureStatus({jobType:candidate.jobType,attempts,maxAttempts:candidate.maxAttempts,timeout});
++      const fatal=['BASEER_JOB_TYPE_UNKNOWN','WORKER_HEALTH_PROBE_INVALID'].includes(error?.code);
++      const status=fatal?'FAILED':jobFailureStatus({jobType:candidate.jobType,attempts,maxAttempts:candidate.maxAttempts,timeout,uncertain});
+       await prisma.baseerJob.update({where:{id:candidate.id},data:{status,runAt:new Date(Date.now()+retryDelay(attempts)),leaseToken:null,leaseUntil:null,lastError:String(error?.message||error).slice(0,1000)}});
+-      if(candidate.actionId)await prisma.agentActionLog.updateMany({where:{id:candidate.actionId,status:'EXECUTING'},data:{status:timeout?'UNKNOWN':(terminal?'FAILED':'APPROVED'),errorCode:timeout?'BASEER_WORKER_TIMEOUT':(error?.code||'BASEER_JOB_FAILED'),notes:String(error?.message||error).slice(0,1000)}});
++      if(candidate.actionId&&actionTransitioned)await prisma.agentActionLog.updateMany({where:{id:candidate.actionId,status:'EXECUTING'},data:{status:'UNKNOWN',errorCode:error?.code||'BASEER_ACTION_OUTCOME_UNKNOWN',notes:String(error?.message||error).slice(0,1000)}});
+       return false;
+     }
+   }
+   return null;
+ }
++
+ async function recoverExpiredJobs(){
+   const expired=await prisma.baseerJob.findMany({where:{status:'RUNNING',leaseUntil:{lt:new Date()}},select:{id:true,actionId:true,jobType:true,attempts:true,maxAttempts:true}});
+   for(const job of expired){
+@@ -125,4 +139,4 @@ async function recoverExpiredJobs(){
+   const executions=await prisma.baseerExecution.updateMany({where:{status:'RUNNING',leaseExpiresAt:{lt:new Date()}},data:{status:'UNKNOWN',leaseToken:null,leaseExpiresAt:null,errorCode:'BASEER_EXECUTION_LEASE_EXPIRED',finishedAt:new Date()}});
+   return {jobs:expired.length,executions:executions.count};
+ }
+-module.exports={processOneJob,recoverExpiredJobs,executeApprovedAction,executeApprovedActionIsolated,workerTimeoutMs,hardWorkerTimeoutMs,killProcessTree,markWorkerShuttingDown};
++module.exports={processOneJob,recoverExpiredJobs,executeApprovedAction,executeApprovedActionIsolated,workerTimeoutMs,hardWorkerTimeoutMs,killProcessTree,markWorkerShuttingDown,isWorkerShuttingDown};
+diff --git a/backend/src/services/baseer/public-input.js b/backend/src/services/baseer/public-input.js
+new file mode 100644
+index 0000000..c0b3bf4
+--- /dev/null
++++ b/backend/src/services/baseer/public-input.js
+@@ -0,0 +1,9 @@
++'use strict';
++const { BaseerError } = require('./errors');
++function optionalBoolean(body, key) {
++  if (!Object.prototype.hasOwnProperty.call(body || {}, key)) return undefined;
++  const value = body[key];
++  if (typeof value !== 'boolean') throw new BaseerError('BOOLEAN_INPUT_INVALID', `${key} must be a JSON boolean.`, 400);
++  return value;
++}
++module.exports = { optionalBoolean };
+diff --git a/backend/src/services/baseer/version.js b/backend/src/services/baseer/version.js
+index df841ac..82694a1 100644
+--- a/backend/src/services/baseer/version.js
++++ b/backend/src/services/baseer/version.js
+@@ -1,2 +1,2 @@
+ 'use strict';
+-module.exports=Object.freeze({product:'بصير',version:'V1R22',sourceVersion:'1.22.0',modes:['EXECUTIVE','KNOWLEDGE','TALENT','RECRUITMENT','ONBOARDING'],build:'cumulative-corrective'});
++module.exports=Object.freeze({product:'بصير',version:'V1R23',sourceVersion:'1.23.0',modes:['EXECUTIVE','KNOWLEDGE','TALENT','RECRUITMENT','ONBOARDING'],build:'cumulative-corrective'});
+diff --git a/backend/src/services/baseer/voice-consent-policy.js b/backend/src/services/baseer/voice-consent-policy.js
+index 17eee80..d36633e 100644
+--- a/backend/src/services/baseer/voice-consent-policy.js
++++ b/backend/src/services/baseer/voice-consent-policy.js
+@@ -1,7 +1,7 @@
+ 'use strict';
+ const { BaseerError } = require('./errors');
+-// TRANSCRIBED is still revocable because the room may remain open until ROOM_ENDED.
+-const ACTIVE_VOICE_STATUSES = Object.freeze(['CREATED', 'ACTIVE', 'TRANSCRIBING', 'TRANSCRIBED']);
++const { ROOM_OPEN_STATUSES } = require('./voice-state-machine');
++const ACTIVE_VOICE_STATUSES = ROOM_OPEN_STATUSES;
+ function revocationWhere({ candidateSessionId, revokeInterview }) {
+   return { candidateSessionId, status: { in: [...ACTIVE_VOICE_STATUSES] }, ...(revokeInterview ? {} : { recordingEnabled: true }) };
+ }
+diff --git a/backend/src/services/baseer/voice-state-machine.js b/backend/src/services/baseer/voice-state-machine.js
+new file mode 100644
+index 0000000..d5af06c
+--- /dev/null
++++ b/backend/src/services/baseer/voice-state-machine.js
+@@ -0,0 +1,36 @@
++'use strict';
++const { BaseerError } = require('./errors');
++const ROOM_OPEN_STATUSES = Object.freeze(['CREATED', 'ACTIVE', 'TRANSCRIBING', 'TRANSCRIBED']);
++const TERMINAL_STATUSES = Object.freeze(['ENDED', 'FAILED', 'CONSENT_REVOKED']);
++function transition(status, event) {
++  const current = String(status || 'CREATED').toUpperCase();
++  const type = String(event || '').toUpperCase();
++  if (current === 'CONSENT_REVOKED') throw new BaseerError('VOICE_CONSENT_REVOKED', 'Voice session consent has been withdrawn.', 409);
++  if (type === 'RECORDING_READY') {
++    if (['ACTIVE', 'TRANSCRIBING', 'TRANSCRIBED', 'ENDED'].includes(current)) return { status: current, stale: false };
++    throw new BaseerError('VOICE_EVENT_OUT_OF_ORDER', `RECORDING_READY is not valid after ${current}.`, 409);
++  }
++  if (type === 'FAILED') return { status: current === 'ENDED' ? 'ENDED' : 'FAILED', stale: current === 'ENDED' || current === 'FAILED' };
++  if (type === 'ROOM_ENDED') {
++    if (current === 'FAILED') return { status: 'FAILED', stale: true };
++    return { status: 'ENDED', stale: current === 'ENDED' };
++  }
++  if (type === 'ROOM_STARTED') {
++    if (current === 'CREATED') return { status: 'ACTIVE', stale: false };
++    if (current === 'ACTIVE') return { status: 'ACTIVE', stale: true };
++    throw new BaseerError('VOICE_EVENT_OUT_OF_ORDER', `ROOM_STARTED is not valid after ${current}.`, 409);
++  }
++  if (type === 'TRANSCRIPT_PARTIAL') {
++    if (['CREATED', 'ACTIVE', 'TRANSCRIBING'].includes(current)) return { status: 'TRANSCRIBING', stale: false };
++    if (['TRANSCRIBED', 'ENDED'].includes(current)) return { status: current, stale: true };
++    throw new BaseerError('VOICE_EVENT_OUT_OF_ORDER', `TRANSCRIPT_PARTIAL is not valid after ${current}.`, 409);
++  }
++  if (type === 'TRANSCRIPT_FINAL') {
++    if (['CREATED', 'ACTIVE', 'TRANSCRIBING'].includes(current)) return { status: 'TRANSCRIBED', stale: false };
++    if (current === 'TRANSCRIBED') return { status: 'TRANSCRIBED', stale: true };
++    if (current === 'ENDED') return { status: 'ENDED', stale: false };
++    throw new BaseerError('VOICE_EVENT_OUT_OF_ORDER', `TRANSCRIPT_FINAL is not valid after ${current}.`, 409);
++  }
++  throw new BaseerError('VOICE_EVENT_INVALID', 'Unsupported voice callback event.', 400);
++}
++module.exports = { ROOM_OPEN_STATUSES, TERMINAL_STATUSES, transition };
+diff --git a/backend/src/services/baseer/voice.service.js b/backend/src/services/baseer/voice.service.js
+index a263f94..a7b560b 100644
+--- a/backend/src/services/baseer/voice.service.js
++++ b/backend/src/services/baseer/voice.service.js
+@@ -6,6 +6,8 @@ const { BaseerError } = require('./errors');
+ const { safeEqual, stable } = require('./crypto');
+ const livekit = require('./livekit-token.service');
+ const { ACTIVE_VOICE_STATUSES, revocationWhere, revocationData, assertVoiceEventConsent } = require('./voice-consent-policy');
++const { transition: voiceTransition } = require('./voice-state-machine');
++const { optionalBoolean } = require('./public-input');
+ 
+ const { voiceTerminationTimeoutMs, voiceTerminationMaxAttempts } = require('./voice-runtime-config');
+ function signaturePayload(timestamp, nonce, voiceSessionId, body) { return `${timestamp}.${nonce}.${voiceSessionId}.${typeof body === 'string' ? body : stable(body)}`; }
+@@ -42,7 +44,7 @@ function voiceJoinResponse(row, candidateSessionId) {
+ 
+ async function createVoiceSession({ candidateSession, input }) {
+   if (!livekit.configured()) throw new BaseerError('VOICE_NOT_CONFIGURED', 'LiveKit and the Baseer voice client URL must be configured before voice interviews can start.', 503);
+-  const recordingEnabled = Boolean(input.recording);
++  const recordingEnabled = optionalBoolean(input || {}, 'recording') ?? false;
+   const row = await prisma.$transaction(async (tx) => {
+     await tx.$queryRawUnsafe('SELECT "id" FROM "baseer_candidate_sessions" WHERE "id" = $1 FOR UPDATE', candidateSession.id);
+     const current = await tx.baseerCandidateSession.findUnique({ where: { id: candidateSession.id } });
+@@ -176,33 +178,49 @@ async function applyVoiceEventTx(tx, { voiceSessionId, payload }) {
+   if (!voice) throw new BaseerError('VOICE_SESSION_NOT_FOUND', 'Voice session not found.', 404);
+   assertVoiceEventConsent(voice);
+   if (voice.expiresAt <= new Date() && !['RECORDING_READY', 'TRANSCRIPT_FINAL', 'ROOM_ENDED'].includes(event)) throw new BaseerError('VOICE_SESSION_EXPIRED', 'Voice session is expired.', 409);
++  const next = voiceTransition(voice.status, event);
+   const segments = normalizedSegments(payload);
+   const data = {};
+-  if (segments) data.transcript = segments;
+-  if (event === 'ROOM_STARTED') data.status = 'ACTIVE';
+-  if (event === 'TRANSCRIPT_PARTIAL') data.status = 'TRANSCRIBING';
+-  if (event === 'TRANSCRIPT_FINAL') data.status = 'TRANSCRIBED';
+-  if (event === 'ROOM_ENDED') data.status = segments?.length || voice.transcript ? 'TRANSCRIBED' : 'ENDED';
+-  if (event === 'FAILED') data.status = 'FAILED';
++  if (segments && (!next.stale || ['TRANSCRIPT_FINAL', 'ROOM_ENDED'].includes(event))) data.transcript = segments;
++  if (next.status !== voice.status) data.status = next.status;
+   if (event === 'RECORDING_READY') {
+     if (!voice.recordingEnabled || !voice.candidateSession.consentRecordingAt) throw new BaseerError('RECORDING_CONSENT_REQUIRED', 'Recording data cannot be accepted without active recording consent.', 409);
+     const recordingUrl = String(payload.recordingUrl || '').trim();
+     if (!/^https:\/\//i.test(recordingUrl)) throw new BaseerError('VOICE_RECORDING_URL_INVALID', 'Recording URL must use HTTPS.', 400);
+     data.recordingUrl = recordingUrl.slice(0, 2000);
+   }
+-  if (event === 'TRANSCRIPT_FINAL') {
+-    const transitioned = await tx.baseerVoiceSession.updateMany({
+-      where: { id: voice.id, status: { not: 'TRANSCRIBED' } },
+-      data
++  let updated = voice;
++  if (Object.keys(data).length) updated = await tx.baseerVoiceSession.update({ where: { id: voice.id }, data });
++  if (['TRANSCRIPT_FINAL', 'ROOM_ENDED'].includes(event) && segments?.length) {
++    const existingArtifact = await tx.baseerInterviewArtifact.findFirst({
++      where: {
++        sessionId: voice.candidateSession.id,
++        artifactType: 'VOICE_TRANSCRIPT',
++        OR: [
++          { questionId: voice.id },
++          { content: { path: ['voiceSessionId'], equals: voice.id } }
++        ]
++      },
++      select: { id: true }
+     });
+-    if (transitioned.count === 1 && segments?.length) {
+-      await tx.baseerInterviewArtifact.create({
+-        data: { applicationId: voice.candidateSession.applicationId, sessionId: voice.candidateSession.id, artifactType: 'VOICE_TRANSCRIPT', status: 'DRAFT', content: { voiceSessionId: voice.id, segments, humanReviewRequired: true } }
+-      });
++    if (!existingArtifact) {
++      try {
++        await tx.baseerInterviewArtifact.create({
++          data: {
++            applicationId: voice.candidateSession.applicationId,
++            sessionId: voice.candidateSession.id,
++            artifactType: 'VOICE_TRANSCRIPT',
++            questionId: voice.id,
++            status: 'DRAFT',
++            content: { voiceSessionId: voice.id, segments, humanReviewRequired: true }
++          }
++        });
++      } catch (error) {
++        if (error?.code !== 'P2002') throw error;
++      }
+     }
+-    return tx.baseerVoiceSession.findUnique({ where: { id: voice.id } });
+   }
+-  return tx.baseerVoiceSession.update({ where: { id: voice.id }, data });
++  return updated;
+ }
+ 
+ async function applyVoiceEvent({ voiceSessionId, payload }) {
+diff --git a/backend/test/baseer-v1r19-contract.test.js b/backend/test/baseer-v1r19-contract.test.js
+index 4b38bd3..4b65227 100644
+--- a/backend/test/baseer-v1r19-contract.test.js
++++ b/backend/test/baseer-v1r19-contract.test.js
+@@ -6,12 +6,12 @@ test('feature flag blocks Baseer routes and worker execution',()=>{const routes=
+ test('candidate link uses one-time fragment bootstrap and rotating refresh tokens',()=>{const backend=read('src/services/baseer/recruitment.service.js');const frontend=read('../frontend/src/pages/BaseerCandidateInterview.jsx');assert.match(backend,/#bootstrap=/);assert.match(backend,/bootstrapUsedAt:\s*null/);assert.match(backend,/tokenVersion:\s*\{\s*increment:\s*1/);assert.match(frontend,/history\.replaceState/);assert.match(frontend,/sessionStorage/);assert.match(frontend,/candidateRefresh/);});
+ test('candidate sessions require a human-approved interview plan and expose only public questions',()=>{const service=read('src/services/baseer/recruitment.service.js');const controller=read('src/controllers/baseer-public.controller.js');const frontend=read('../frontend/src/pages/BaseerCandidateInterview.jsx');assert.match(service,/BASEER_AI_PROCESS_CANDIDATE_DATA/);assert.match(service,/APPROVED_INTERVIEW_PLAN_REQUIRED/);assert.match(service,/artifactType: 'INTERVIEW_PLAN', status: 'APPROVED'/);assert.match(service,/CANDIDATE_QUESTION_INVALID/);assert.match(service,/CANDIDATE_QUESTION_ALREADY_ANSWERED/);assert.match(service,/reviewArtifact/);assert.match(controller,/questions: recruitment\.candidateQuestions\(row\)/);assert.doesNotMatch(controller,/hiddenEvaluationCriteria/);assert.match(frontend,/currentQuestion\.id/);});
+ test('candidate rate limiting occurs after valid token resolution and does not trust raw forwarding headers',()=>{const controller=read('src/controllers/baseer-public.controller.js');const limiter=read('src/services/baseer/rate-limit.js');const sessionBody=controller.slice(controller.indexOf('async function session'),controller.indexOf('exports.bootstrap'));assert.ok(sessionBody.indexOf('resolveCandidateToken')<sessionBody.indexOf('consumeCandidateSession'));assert.match(limiter,/baseer_rate_limit_buckets/);assert.match(limiter,/internal-ip:/);assert.match(read('src/routes/baseer-internal.routes.js'),/baseerInternalIpRateLimit/);assert.doesNotMatch(limiter,/x-forwarded-for/i);});
+-test('voice integration creates LiveKit grants and atomically records callback nonce with event',()=>{const token=read('src/services/baseer/livekit-token.service.js');const voice=read('src/services/baseer/voice.service.js');const controller=read('src/controllers/baseer-internal.controller.js');assert.match(token,/roomJoin:\s*true/);assert.match(voice,/processSignedVoiceEvent/);assert.match(voice,/\$transaction/);assert.match(voice,/signaturePayload\(timestamp, nonce, voiceSessionId, body\)/);assert.match(voice,/status: \{ not: 'TRANSCRIBED' \}/);assert.match(voice,/transitioned\.count === 1/);assert.match(controller,/voiceSessionId: req\.params\.voiceSessionId/);assert.match(controller,/processSignedVoiceEvent/);assert.match(controller,/processSignedVoiceContext/);assert.match(voice,/publicInterviewQuestions/);assert.match(voice,/pg_advisory_xact_lock/);assert.match(voice,/ACTIVE_VOICE_STATUSES/);assert.match(read('src/services/baseer/voice-consent-policy.js'),/TRANSCRIBED/);assert.match(read('src/routes/baseer-internal.routes.js'),/voice\/:voiceSessionId\/context/);assert.doesNotMatch(voice,/participantToken,\s*joinUrl/);});
++test('voice integration creates LiveKit grants and atomically records callback nonce with event',()=>{const token=read('src/services/baseer/livekit-token.service.js');const voice=read('src/services/baseer/voice.service.js');const controller=read('src/controllers/baseer-internal.controller.js');assert.match(token,/roomJoin:\s*true/);assert.match(voice,/processSignedVoiceEvent/);assert.match(voice,/\$transaction/);assert.match(voice,/signaturePayload\(timestamp, nonce, voiceSessionId, body\)/);assert.match(voice,/voiceTransition\(voice\.status, event\)/);assert.match(voice,/questionId: voice\.id/);assert.match(controller,/voiceSessionId: req\.params\.voiceSessionId/);assert.match(controller,/processSignedVoiceEvent/);assert.match(controller,/processSignedVoiceContext/);assert.match(voice,/publicInterviewQuestions/);assert.match(voice,/pg_advisory_xact_lock/);assert.match(voice,/ACTIVE_VOICE_STATUSES/);assert.match(read('src/services/baseer/voice-state-machine.js'),/TRANSCRIBED/);assert.match(read('src/routes/baseer-internal.routes.js'),/voice\/:voiceSessionId\/context/);assert.doesNotMatch(voice,/participantToken,\s*joinUrl/);});
+ test('onboarding evidence conditions and mutations are constrained to active same-plan records',()=>{const source=read('src/services/baseer/onboarding.service.js');assert.match(source,/ONBOARDING_CONDITION_EVIDENCE_SCOPE_DENIED/);assert.match(source,/task:\s*\{\s*planId/);assert.match(source,/ONBOARDING_PLAN_ARCHIVED/);assert.match(source,/validateEvidenceConditions/);});
+ test('permission lookup fails closed on database errors instead of silently granting defaults',()=>{const source=read('src/services/baseer/permissions.js');assert.doesNotMatch(source,/findUnique\([\s\S]{0,220}\.catch\(\(\) => null\)/);assert.match(source,/if \(row\) return result\(row\.isEnabled === true, row\.scope/);});
+ test('legacy onboarding mutations use exact Baseer permission guards',()=>{const routes=read('src/routes/onboarding.routes.js');assert.match(routes,/requireBaseerPermission\('tool:onboarding\.createPlan'\)/);assert.match(routes,/requireBaseerPermission\('tool:onboarding\.toggleTask'\)/);assert.doesNotMatch(routes,/router\.post\('\/plans',\s*isHRManager/);});
+ test('Prisma schema contains Baseer relations, distributed limits and webhook replay protection',()=>{const schema=read('prisma/schema.prisma');for(const model of ['BaseerRateLimitBucket','BaseerWebhookNonce','BaseerVoiceSession','BaseerCandidateSession'])assert.match(schema,new RegExp(`model ${model} \\{`));assert.match(schema,/application\s+Application\s+@relation/);assert.match(schema,/task\s+OnboardingTask\s+@relation/);assert.match(schema,/user\s+User\s+@relation/);});
+ test('mutating tools require caller-controlled idempotency while read tools get unique executions',()=>{const source=read('src/services/baseer/orchestrator.js');assert.match(source,/tool\.risk !== 'R0'/);assert.match(source,/BASEER_IDEMPOTENCY_REQUIRED/);assert.match(source,/suppliedKey \|\| crypto\.randomUUID\(\)/);assert.doesNotMatch(source,/createHash\('sha256'\)\.update\(`\$\{user\.id\}:\$\{tool\.name\}/);});
+-test('latest Baseer version is consistent across backend and UI',()=>{assert.match(read('src/services/baseer/version.js'),/V1R22/);assert.match(read('../frontend/src/pages/BaseerWorkspace.jsx'),/V1R22/);assert.match(read('src/app.js'),/version:\s*'1\.22\.0'/);});
++test('latest Baseer version is consistent across backend and UI',()=>{assert.match(read('src/services/baseer/version.js'),/V1R23/);assert.match(read('../frontend/src/pages/BaseerWorkspace.jsx'),/V1R23/);assert.match(read('src/app.js'),/version:\s*'1\.23\.0'/);});
+ test('full-source deploy verifies independent SHA, safe archive, isolated build and atomic cutover',()=>{const deploy=read('../APPLY-THRS-BASEER-V1R19-FULL-SOURCE.sh');assert.match(deploy,/BASEER_TRUSTED_SOURCE_SHA256/);assert.match(deploy,/non-regular archive member/);assert.match(deploy,/npm run baseer:verify-v1r19/);assert.match(deploy,/npm run prisma:migrate/);assert.match(deploy,/atomic_exchange/);assert.match(deploy,/verify_pm2/);assert.match(deploy,/curl --fail/);assert.match(deploy,/rsync -a --delete/);assert.match(deploy,/generate "\$TARGET" "\$PREVIOUS_MANIFEST"/);assert.match(deploy,/verify "\$RELEASE" "\$PREVIOUS_MANIFEST"/);assert.ok(deploy.indexOf('verify_previous_release')<deploy.indexOf('atomic_exchange "$TARGET" "$RELEASE" || restore_failed=1'));});
+ test('source manifest records metadata and manual rollback verifies the previous release before stopping services',()=>{const helper=read('../scripts/baseer-v1r19-source-manifest.py');const rollback=read('../ROLLBACK-THRS-BASEER-V1R19-FULL-SOURCE.sh');assert.match(helper,/'mode': stat\.S_IMODE/);assert.match(helper,/'uid': info\.st_uid/);assert.match(helper,/'gid': info\.st_gid/);assert.match(helper,/'nlink': info\.st_nlink/);assert.match(rollback,/verify "\$PREVIOUS_RELEASE" "\$PREVIOUS_MANIFEST"/);const main=rollback.slice(rollback.indexOf('exec 9>'));const verifyAt=main.indexOf('python3 "$MANIFEST_TOOL" verify "$PREVIOUS_RELEASE" "$PREVIOUS_MANIFEST"');const stopAt=main.indexOf('for process in $PM2_NAMES; do pm2 stop');assert.ok(verifyAt>=0&&stopAt>verifyAt);assert.match(rollback,/recover_current/);assert.match(rollback,/verify_pm2/);assert.match(rollback,/curl --fail/);});
+diff --git a/backend/test/baseer-v1r22-contract.test.js b/backend/test/baseer-v1r22-contract.test.js
+index e86e337..ef9d155 100644
+--- a/backend/test/baseer-v1r22-contract.test.js
++++ b/backend/test/baseer-v1r22-contract.test.js
+@@ -6,4 +6,4 @@ test('termination retries and expired leases never become UNKNOWN before max att
+ test('worker registers isolated runners and cleans them on startup and shutdown',()=>{const j=read('src/services/baseer/jobs.service.js'),w=read('scripts/baseer-worker.js'),i=read('src/services/baseer/worker-isolation.js');assert.match(j,/registerRunner/);assert.match(j,/BASEER_WORKER_SHUTDOWN/);assert.match(j,/unregisterRunner/);assert.match(w,/cleanupOrphanedRunners/);assert.match(w,/killAllRegisteredRunners/);assert.match(w,/markWorkerShuttingDown/);assert.match(i,/baseer-action-runner\.js/);assert.match(i,/startTime/);});
+ test('V1R22 deployment gates V1R21 source before npm and migrates only after swap',()=>{const a=read('../APPLY-THRS-BASEER-V1R22-FULL-SOURCE.sh');assert.ok(a.indexOf('BASELINE-THRS-BASEER-V1R21-SOURCE-MANIFEST')<a.indexOf('npm ci'));assert.ok(a.indexOf('atomic_exchange "$TARGET" "$RELEASE"')<a.indexOf('npm run prisma:migrate'));assert.match(a,/baseer:verify-worker-live-v1r22/);assert.match(a,/baseer-runner-cleanup/);});
+ test('rollback preserves latest env and verifies trusted release manifests',()=>{const r=read('../ROLLBACK-THRS-BASEER-V1R22-FULL-SOURCE.sh');assert.match(r,/copy_env "\$TARGET\/backend\/\.env" "\$PREVIOUS_RELEASE\/backend\/\.env"/);assert.match(r,/verify-runtime "\$TARGET" "\$CURRENT_MANIFEST"/);assert.match(r,/verify-runtime "\$PREVIOUS_RELEASE" "\$PREVIOUS_MANIFEST"/);});
+-test('worker liveness uses a real database job',()=>{const s=read('scripts/verify-baseer-worker-live-v1r22.js'),j=read('src/services/baseer/jobs.service.js');assert.match(s,/WORKER_HEALTH_PROBE/);assert.match(s,/baseerJob\.create/);assert.match(s,/status === 'SUCCEEDED'/);assert.match(j,/candidate\.jobType==='WORKER_HEALTH_PROBE'/);});
++test('worker liveness uses a versioned real database job',()=>{const s=read('scripts/verify-baseer-worker-live-v1r23.js'),j=read('src/services/baseer/jobs.service.js');assert.match(s,/WORKER_HEALTH_PROBE_V1R23/);assert.match(s,/baseerJob\.create/);assert.match(s,/BASEER_WORKER_V1R23_ACK/);assert.match(j,/candidate\.jobType==='WORKER_HEALTH_PROBE_V1R23'/);});
+diff --git a/backend/test/baseer-v1r23-contract.test.js b/backend/test/baseer-v1r23-contract.test.js
+new file mode 100644
+index 0000000..c085d3e
+--- /dev/null
++++ b/backend/test/baseer-v1r23-contract.test.js
+@@ -0,0 +1,27 @@
++'use strict';
++const test=require('node:test');const assert=require('node:assert/strict');const fs=require('node:fs');const path=require('node:path');
++const root=path.join(__dirname,'..','..');const read=(p)=>fs.readFileSync(path.join(root,p),'utf8');
++test('V1R22 baseline includes the historical V1R19 rollback',()=>{
++ const baseline=read('BASELINE-THRS-BASEER-V1R22-SOURCE-MANIFEST.jsonl');assert.match(baseline,/20260724170000_baseer_v1r19_corrective\.rollback\.sql/);
++});
++test('worker checks shutdown before every claim and after a claim',()=>{
++ const worker=read('backend/scripts/baseer-worker.js'),jobs=read('backend/src/services/baseer/jobs.service.js');assert.match(worker,/i<10&&!stopping/);assert.match(worker,/if\(stopping\)return/);assert.match(jobs,/if \(workerShuttingDown\) return null/);assert.match(jobs,/status:'PENDING'.*leaseToken:null/s);
++});
++test('unknown and protocol-lost approved actions never return to APPROVED',()=>{
++ const jobs=read('backend/src/services/baseer/jobs.service.js'),policy=read('backend/src/services/baseer/job-retry-policy.js');assert.match(jobs,/BASEER_JOB_TYPE_UNKNOWN/);assert.match(jobs,/status:'UNKNOWN'/);assert.match(policy,/jobType==='EXECUTE_APPROVED_ACTION'\)return 'UNKNOWN'/);
++});
++test('V1R23 health probe requires an exact acknowledgement',()=>{
++ const verifier=read('backend/scripts/verify-baseer-worker-live-v1r23.js'),jobs=read('backend/src/services/baseer/jobs.service.js');assert.match(verifier,/WORKER_HEALTH_PROBE_V1R23/);assert.match(verifier,/BASEER_WORKER_V1R23_ACK/);assert.match(jobs,/candidate\.payload\?\.workerVersion!=='V1R23'/);assert.match(jobs,/BASEER_WORKER_V1R23_ACK/);
++});
++test('voice lifecycle closes rooms and transcript artifacts are idempotent',()=>{
++ const voice=read('backend/src/services/baseer/voice.service.js'),machine=read('backend/src/services/baseer/voice-state-machine.js');assert.match(machine,/ROOM_ENDED/);assert.match(machine,/status: 'ENDED'/);assert.match(voice,/questionId: voice\.id/);assert.match(voice,/path: \['voiceSessionId'\]/);assert.match(voice,/error\?\.code !== 'P2002'/);
++});
++test('candidate consent does not coerce strings into true',()=>{
++ const controller=read('backend/src/controllers/baseer-public.controller.js');assert.match(controller,/optionalBoolean\(req\.body, 'interview'\)/);assert.doesNotMatch(controller,/Boolean\(req\.body\.interview\)/);
++});
++test('apply and rollback reject an uploads root symlink',()=>{
++ for(const file of ['APPLY-THRS-BASEER-V1R23-FULL-SOURCE.sh','ROLLBACK-THRS-BASEER-V1R23-FULL-SOURCE.sh']){const text=read(file);assert.match(text,/os\.lstat\(root\)/);assert.match(text,/uploads root must be a real directory/);assert.match(text,/! -L "\$1"/);}
++});
++test('V1R23 deployment gates the exact V1R22 source and live V1R23 worker',()=>{
++ const apply=read('APPLY-THRS-BASEER-V1R23-FULL-SOURCE.sh');assert.match(apply,/BASELINE-THRS-BASEER-V1R22-SOURCE-MANIFEST/);assert.match(apply,/baseer:verify-worker-live-v1r23/);assert.ok(apply.indexOf('BASELINE-THRS-BASEER-V1R22-SOURCE-MANIFEST')<apply.indexOf('npm ci'));
++});
+diff --git a/backend/test/baseer-v1r23-deploy-e2e.test.js b/backend/test/baseer-v1r23-deploy-e2e.test.js
+new file mode 100644
+index 0000000..7d73318
+--- /dev/null
++++ b/backend/test/baseer-v1r23-deploy-e2e.test.js
+@@ -0,0 +1,10 @@
++'use strict';
++const test=require('node:test');const assert=require('node:assert/strict');const fs=require('node:fs');const os=require('node:os');const path=require('node:path');const {spawnSync}=require('node:child_process');
++const rootProject=path.join(__dirname,'..','..');const apply=path.join(rootProject,'APPLY-THRS-BASEER-V1R23-FULL-SOURCE.sh');const rollback=path.join(rootProject,'ROLLBACK-THRS-BASEER-V1R23-FULL-SOURCE.sh');const runtimeTool=path.join(rootProject,'scripts','baseer-v1r21-runtime-manifest.py');const sourceTool=path.join(rootProject,'scripts','baseer-v1r23-source-manifest.py');
++function exe(f,c){fs.writeFileSync(f,c,{mode:0o755});}
++function tree(root,mark){for(const d of ['backend/prisma','backend/scripts','backend/uploads','frontend','scripts'])fs.mkdirSync(path.join(root,d),{recursive:true});fs.writeFileSync(path.join(root,'backend/package.json'),'{}\n');fs.writeFileSync(path.join(root,'backend/package-lock.json'),'{"lockfileVersion":3,"packages":{"":{}}}\n');fs.writeFileSync(path.join(root,'backend/prisma/schema.prisma'),'// schema\n');fs.writeFileSync(path.join(root,'backend/server.js'),`// ${mark}\n`);fs.writeFileSync(path.join(root,'backend/scripts/baseer-worker.js'),`// worker ${mark}\n`);fs.writeFileSync(path.join(root,'backend/scripts/baseer-runner-cleanup.js'),'console.log("cleanup")\n');fs.writeFileSync(path.join(root,'backend/uploads/runtime.txt'),'runtime\n');fs.writeFileSync(path.join(root,'frontend/package.json'),'{}\n');fs.writeFileSync(path.join(root,'frontend/package-lock.json'),'{"lockfileVersion":3,"packages":{"":{}}}\n');fs.copyFileSync(runtimeTool,path.join(root,'scripts/baseer-v1r21-runtime-manifest.py'));fs.copyFileSync(sourceTool,path.join(root,'scripts/baseer-v1r23-source-manifest.py'));}
++function mocks(root,target,mode){const b=path.join(root,'bin');fs.mkdirSync(b);const ps=path.join(root,'pm2');fs.writeFileSync(ps,'online');const cs=path.join(root,'curl');fs.writeFileSync(cs,'0');exe(path.join(b,'npm'),`#!/usr/bin/env bash\nif [[ "${'$'}{1:-}" == run && "${'$'}{2:-}" == build ]];then mkdir -p build;echo x>build/index.html;fi\nexit 0\n`);exe(path.join(b,'pm2'),`#!/usr/bin/env bash\nS=${JSON.stringify(ps)};T=${JSON.stringify(target)}\ncase "${'$'}{1:-}" in jlist) X=$(cat "$S");[[ "$X" == online ]]&&P=123||P=0;printf '[{"name":"thrs-backend","pid":%s,"pm2_env":{"status":"%s","pm_cwd":"%s","pm_exec_path":"%s/backend/server.js"}},{"name":"baseer-worker","pid":%s,"pm2_env":{"status":"%s","pm_cwd":"%s","pm_exec_path":"%s/backend/scripts/baseer-worker.js"}}]\n' "$P" "$X" "$T" "$T" "$P" "$X" "$T" "$T";;stop)echo offline>"$S";;restart)echo online>"$S";;esac\n`);exe(path.join(b,'curl'),`#!/usr/bin/env bash\nM=${JSON.stringify(mode)};S=${JSON.stringify(cs)}\nif [[ "$M" == failonce && "$(cat "$S")" == 0 ]];then echo 1>"$S";exit 22;fi\nexit 0\n`);return b;}
++function fixture(mode='ok'){const r=fs.mkdtempSync(path.join(os.tmpdir(),'v1r23-')),target=path.join(r,'THRS'),parent=path.join(r,'src'),source=path.join(parent,'release');tree(target,'OLD');tree(source,'NEW');fs.writeFileSync(path.join(target,'backend/.env'),'A=1\n',{mode:0o640});const manifest=path.join(source,'BASELINE-THRS-BASEER-V1R22-SOURCE-MANIFEST.jsonl');assert.equal(spawnSync('python3',[sourceTool,'generate',target,manifest],{encoding:'utf8'}).status,0);const archive=path.join(r,'source.tar.gz');assert.equal(spawnSync('tar',['-czf',archive,'-C',parent,'release']).status,0);const sha=spawnSync('sha256sum',[archive],{encoding:'utf8'}).stdout.split(/\s+/)[0],shaFile=path.join(r,'source.sha256');fs.writeFileSync(shaFile,`${sha}  source.tar.gz\n`);const bin=mocks(r,target,mode);return{r,target,archive,shaFile,env:{...process.env,PATH:`${bin}:${process.env.PATH}`,BASEER_TRUSTED_SOURCE_SHA256:sha,BASEER_STABILITY_SECONDS:'0',BASEER_HEALTHCHECK_URL:'http://health'}};}
++const marker=t=>fs.readFileSync(path.join(t,'backend/server.js'),'utf8');
++test('V1R23 full-source apply and manual rollback',{skip:process.platform!=='linux'},()=>{const f=fixture();try{const a=spawnSync('bash',[apply,f.archive,f.shaFile,f.target,'http://health'],{env:f.env,encoding:'utf8',timeout:30000});assert.equal(a.status,0,`${a.stdout}\n${a.stderr}`);assert.match(marker(f.target),/NEW/);const v=Object.fromEntries(a.stdout.split(/\r?\n/).filter(x=>x.includes('=')).map(x=>x.split(/=(.*)/s).slice(0,2)));const q=spawnSync('bash',[rollback,f.target,v.PREVIOUS_RELEASE,v.STATE_DIR,'http://health'],{env:f.env,encoding:'utf8',timeout:30000});assert.equal(q.status,0,`${q.stdout}\n${q.stderr}`);assert.match(marker(f.target),/OLD/);}finally{fs.rmSync(f.r,{recursive:true,force:true});}});
++test('V1R23 auto rollback restores V1R22 after health failure',{skip:process.platform!=='linux'},()=>{const f=fixture('failonce');try{const a=spawnSync('bash',[apply,f.archive,f.shaFile,f.target,'http://health'],{env:f.env,encoding:'utf8',timeout:30000});assert.notEqual(a.status,0);assert.match(marker(f.target),/OLD/);assert.match(a.stderr,/verified V1R22 restored/i);}finally{fs.rmSync(f.r,{recursive:true,force:true});}});
+diff --git a/backend/test/baseer-v1r23-deploy.test.js b/backend/test/baseer-v1r23-deploy.test.js
+new file mode 100644
+index 0000000..0ceecd1
+--- /dev/null
++++ b/backend/test/baseer-v1r23-deploy.test.js
+@@ -0,0 +1,13 @@
++'use strict';
++const test=require('node:test');const assert=require('node:assert/strict');const fs=require('node:fs');const os=require('node:os');const path=require('node:path');const {spawnSync}=require('node:child_process');
++const root=path.join(__dirname,'..','..');
++test('V1R23 source baseline verifies the clean V1R22 checkout',()=>{
++ const out=spawnSync('python3',[path.join(root,'scripts/baseer-v1r23-source-manifest.py'),'verify',root,path.join(root,'BASELINE-THRS-BASEER-V1R22-SOURCE-MANIFEST.jsonl')],{encoding:'utf8'});
++ // The current V1R23 tree must differ; verify the tool reports that difference rather than accepting it.
++ assert.notEqual(out.status,0);assert.match(`${out.stderr}${out.stdout}`,/unexpected:|changed:/);
++});
++test('deployment scripts reject an uploads root symlink before traversal',()=>{
++ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'baseer-v1r23-upload-'));const real=path.join(dir,'real');const link=path.join(dir,'uploads');fs.mkdirSync(real);fs.symlinkSync(real,link,'dir');
++ const code=`import os,stat,sys\nroot=sys.argv[1]\ninfo=os.lstat(root)\nif stat.S_ISLNK(info.st_mode) or not stat.S_ISDIR(info.st_mode):raise SystemExit('uploads root must be a real directory')`;
++ const out=spawnSync('python3',['-c',code,link],{encoding:'utf8'});fs.rmSync(dir,{recursive:true,force:true});assert.notEqual(out.status,0);assert.match(out.stderr,/uploads root must be a real directory/);
++});
+diff --git a/backend/test/baseer-v1r23-unit.test.js b/backend/test/baseer-v1r23-unit.test.js
+new file mode 100644
+index 0000000..6651809
+--- /dev/null
++++ b/backend/test/baseer-v1r23-unit.test.js
+@@ -0,0 +1,27 @@
++'use strict';
++const test=require('node:test');const assert=require('node:assert/strict');
++const {optionalBoolean}=require('../src/services/baseer/public-input');
++const {transition,ROOM_OPEN_STATUSES}=require('../src/services/baseer/voice-state-machine');
++const {jobFailureStatus}=require('../src/services/baseer/job-retry-policy');
++
++test('public consent accepts only JSON booleans',()=>{
++ assert.equal(optionalBoolean({},'interview'),undefined);assert.equal(optionalBoolean({interview:false},'interview'),false);assert.equal(optionalBoolean({interview:true},'interview'),true);
++ for(const value of ['false','true',0,1,null])assert.throws(()=>optionalBoolean({interview:value},'interview'),/must be a JSON boolean/);
++ assert.throws(()=>optionalBoolean({recording:'false'},'recording'),/must be a JSON boolean/);
++});
++test('room ended is terminal even when a transcript exists',()=>{
++ assert.equal(transition('TRANSCRIBED','ROOM_ENDED').status,'ENDED');assert.ok(!ROOM_OPEN_STATUSES.includes('ENDED'));
++ assert.throws(()=>transition('ENDED','ROOM_STARTED'),/not valid/);assert.deepEqual(transition('FAILED','ROOM_ENDED'),{status:'FAILED',stale:true});
++});
++test('late transcript final can attach content without reopening ended room',()=>{
++ assert.deepEqual(transition('ENDED','TRANSCRIPT_FINAL'),{status:'ENDED',stale:false});
++ assert.deepEqual(transition('ENDED','TRANSCRIPT_PARTIAL'),{status:'ENDED',stale:true});
++});
++test('approved action failures are always reconciliation-only',()=>{
++ assert.equal(jobFailureStatus({jobType:'EXECUTE_APPROVED_ACTION',attempts:1,maxAttempts:5,timeout:false,uncertain:false}),'UNKNOWN');
++ assert.equal(jobFailureStatus({jobType:'EXECUTE_APPROVED_ACTION',attempts:1,maxAttempts:5,timeout:false,uncertain:true}),'UNKNOWN');
++});
++test('voice termination remains the only automatically retryable side effect',()=>{
++ assert.equal(jobFailureStatus({jobType:'TERMINATE_VOICE_ROOM',attempts:1,maxAttempts:3,timeout:true}),'PENDING');
++ assert.equal(jobFailureStatus({jobType:'TERMINATE_VOICE_ROOM',attempts:3,maxAttempts:3,timeout:true}),'FAILED');
++});
+diff --git a/frontend/src/pages/BaseerWorkspace.jsx b/frontend/src/pages/BaseerWorkspace.jsx
+index fc08fd2..3e6fec2 100644
+--- a/frontend/src/pages/BaseerWorkspace.jsx
++++ b/frontend/src/pages/BaseerWorkspace.jsx
+@@ -21,7 +21,7 @@ export default function BaseerWorkspace(){
+  const send=async(event)=>{event?.preventDefault();const message=text.trim();if(!message||busy)return;setBusy(true);setError('');setText('');setMessages((old)=>[...old,{id:`local-${Date.now()}`,role:'user',content:message}]);try{const result=await baseer.chat({conversationId:conversationId||undefined,message,mode});setConversationId(result.conversationId);setMessages((old)=>[...old,result.message]);await refresh();}catch(e){setError(e.message||'تعذر تنفيذ الطلب');}finally{setBusy(false);}};
+  const decide=async(id,approved)=>{try{setBusy(true);approved?await baseer.approve(id):await baseer.reject(id,'Rejected from Baseer workspace');await refresh();}catch(e){setError(e.message||'تعذر تحديث طلب الاعتماد');}finally{setBusy(false);}};
+  return <div className="baseer-page" dir="rtl">
+-  <header className="baseer-hero"><div className="baseer-brand"><span className="baseer-logo"><Bot size={26}/></span><div><h1>بصير</h1><p>مساعد الموارد البشرية الذكي — قرارات موثقة وتنفيذ خاضع للصلاحيات</p></div></div><div className="baseer-trust"><ShieldCheck size={17}/> النطاق: {boot?.product?.scope?.scope||'—'} · V1R22</div></header>
++  <header className="baseer-hero"><div className="baseer-brand"><span className="baseer-logo"><Bot size={26}/></span><div><h1>بصير</h1><p>مساعد الموارد البشرية الذكي — قرارات موثقة وتنفيذ خاضع للصلاحيات</p></div></div><div className="baseer-trust"><ShieldCheck size={17}/> النطاق: {boot?.product?.scope?.scope||'—'} · V1R23</div></header>
+   {error&&<div className="baseer-error"><X size={16}/>{error}</div>}
+   <div className="baseer-modebar">{MODES.map((item)=>{const Icon=item.icon;return <button key={item.id} className={mode===item.id?'active':''} onClick={()=>setMode(item.id)}><Icon size={17}/><span>{item.label}</span></button>;})}</div>
+   <div className="baseer-grid">
+diff --git a/scripts/baseer-v1r23-source-manifest.py b/scripts/baseer-v1r23-source-manifest.py
+new file mode 100755
+index 0000000..ab9dd82
+--- /dev/null
++++ b/scripts/baseer-v1r23-source-manifest.py
+@@ -0,0 +1,49 @@
++#!/usr/bin/env python3
++import hashlib,json,os,stat,sys
++from pathlib import Path
++EXCLUDED_DIRS={'.git','node_modules','build','coverage','.cache','__pycache__','.pytest_cache'}
++EXCLUDED_FILES={'.env','.DS_Store'}
++def ignored(rel):
++ p=rel.parts
++ if any(x in EXCLUDED_DIRS for x in p): return True
++ if p and p[-1] in EXCLUDED_FILES: return True
++ if p[:2]==('backend','uploads'): return True
++ if p and (p[-1].endswith('.log') or p[-1].endswith('.pyc')): return True
++ return False
++def digest(path):
++ h=hashlib.sha256()
++ with open(path,'rb') as f:
++  for b in iter(lambda:f.read(1024*1024),b''): h.update(b)
++ return h.hexdigest()
++def snapshot(root):
++ root=Path(root).resolve(strict=True); rows=[]
++ for current,dirs,files in os.walk(root,topdown=True,followlinks=False):
++  current=Path(current); kept=[]
++  for name in sorted(dirs):
++   path=current/name; rel=path.relative_to(root)
++   if ignored(rel): continue
++   info=os.lstat(path)
++   if stat.S_ISLNK(info.st_mode): raise SystemExit(f'symlink is forbidden: {rel}')
++   if not stat.S_ISDIR(info.st_mode): raise SystemExit(f'unsupported entry: {rel}')
++   kept.append(name)
++  dirs[:]=kept
++  for name in sorted(files):
++   path=current/name; rel=path.relative_to(root)
++   if ignored(rel): continue
++   info=os.lstat(path)
++   if not stat.S_ISREG(info.st_mode) or info.st_nlink!=1: raise SystemExit(f'unsafe source file: {rel}')
++   rows.append({'path':rel.as_posix(),'mode':stat.S_IMODE(info.st_mode),'size':info.st_size,'sha256':digest(path)})
++ return sorted(rows,key=lambda x:x['path'])
++def main():
++ if len(sys.argv)!=4 or sys.argv[1] not in {'generate','verify'}: raise SystemExit('usage: tool generate|verify ROOT MANIFEST')
++ rows=snapshot(sys.argv[2]); target=Path(sys.argv[3])
++ if sys.argv[1]=='generate': target.write_text('\n'.join(json.dumps(x,sort_keys=True,separators=(',',':')) for x in rows)+'\n'); return
++ expected=[json.loads(x) for x in target.read_text().splitlines() if x]
++ if rows!=expected:
++  a={x['path']:x for x in rows}; e={x['path']:x for x in expected}
++  for p in sorted(e.keys()-a.keys()): print(f'missing: {p}',file=sys.stderr)
++  for p in sorted(a.keys()-e.keys()): print(f'unexpected: {p}',file=sys.stderr)
++  for p in sorted(a.keys()&e.keys()):
++   if a[p]!=e[p]: print(f'changed: {p}',file=sys.stderr)
++  raise SystemExit('V1R22 source baseline mismatch')
++if __name__=='__main__': main()
