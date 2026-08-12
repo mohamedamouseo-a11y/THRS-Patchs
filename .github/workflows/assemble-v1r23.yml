@@ -1,0 +1,41 @@
+name: Assemble V1R23 patch
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/assemble-v1r23.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  assemble:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Assemble and verify patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat \
+            .patch-parts/v1r23.part00.b64 \
+            .patch-parts/v1r23.part01.b64 \
+            .patch-parts/v1r23.part02a.b64 \
+            .patch-parts/v1r23.part02b.b64 \
+            .patch-parts/v1r23.part03a.b64 \
+            .patch-parts/v1r23.part03b.b64 \
+            | base64 -d > /tmp/v1r23.patch.xz
+          xz -dc /tmp/v1r23.patch.xz > THRS-BASEER-CORRECTIVE-V1R23-CUMULATIVE.patch
+          echo '391ad0c629d8159b3bda87b10447f858f7abfba391f0238e9a7be9a22762ef81  THRS-BASEER-CORRECTIVE-V1R23-CUMULATIVE.patch' | sha256sum -c -
+      - name: Commit patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add THRS-BASEER-CORRECTIVE-V1R23-CUMULATIVE.patch
+          if git diff --cached --quiet; then exit 0; fi
+          git commit -m 'Add Baseer V1R23 cumulative patch'
+          git push
