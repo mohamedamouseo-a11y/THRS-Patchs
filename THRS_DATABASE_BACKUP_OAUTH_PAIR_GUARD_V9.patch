@@ -1,0 +1,90 @@
+diff --git a/backend/src/services/databaseBackup.service.js b/backend/src/services/databaseBackup.service.js
+--- a/backend/src/services/databaseBackup.service.js
++++ b/backend/src/services/databaseBackup.service.js
+@@
+ async function saveSettings(input = {}) {
+   const current = await readConfig();
+   const next = JSON.parse(JSON.stringify(current));
+@@
+   const secretAction = cleanText(incomingDrive.clientSecretAction || '', 20).toLowerCase();
+@@
+   if (secretAction === 'set') {
+@@
+   } else if (secretAction === 'clear') {
+@@
+   }
++
++  const clientIdChanged =
++    Object.prototype.hasOwnProperty.call(incomingDrive, 'clientId') &&
++    next.googleDrive.clientId !== current.googleDrive.clientId;
++
++  // Never silently pair a newly entered Client ID with the old stored secret.
++  // That produces Google's invalid_client response and makes the UI look as if
++  // the new OAuth credential pair was saved when it was not.
++  if (clientIdChanged && secretAction !== 'set') {
++    throw new DatabaseBackupError(
++      'Enter the Google Client Secret that belongs to the new Client ID.',
++      400,
++      'CLIENT_SECRET_REQUIRED_FOR_NEW_CLIENT_ID'
++    );
++  }
+
+   // Folder destination changes must not invalidate the OAuth connection.
+   // Only changes to the OAuth identity/secret require reconnecting Google Drive.
+diff --git a/frontend/src/components/Settings/DatabaseBackupTab.jsx b/frontend/src/components/Settings/DatabaseBackupTab.jsx
+--- a/frontend/src/components/Settings/DatabaseBackupTab.jsx
++++ b/frontend/src/components/Settings/DatabaseBackupTab.jsx
+@@
+   const [clientSecret, setClientSecret] = useState('');
+   const [driveDirty, setDriveDirty] = useState(false);
+   const clientSecretRef = useRef(null);
++  const loadedClientIdRef = useRef('');
+   const scheduleTimeRef = useRef(null);
+@@
+       setStatus(next);
+       if (next?.config) {
++        loadedClientIdRef.current = next.config.googleDrive?.clientId || '';
+         setForm({
+@@
+   const updateDrive = (key, value) => {
+     setDriveDirty(true);
+     setForm((prev) => ({ ...prev, googleDrive: { ...prev.googleDrive, [key]: value } }));
+   };
++
++  const getLiveClientSecret = () =>
++    String(clientSecretRef.current?.value || clientSecret || '').trim();
++
++  const assertSecretForChangedClientId = (liveClientSecret) => {
++    const currentClientId = String(form.googleDrive?.clientId || '').trim();
++    const loadedClientId = String(loadedClientIdRef.current || '').trim();
++    if (currentClientId !== loadedClientId && !liveClientSecret) {
++      throw new Error(
++        'You changed the Google Client ID. Enter the matching Google Client Secret before saving or connecting.'
++      );
++    }
++  };
+@@
+   const handleSave = async () => {
+     setBusy('save'); setMessage('');
+     try {
+-      const liveClientSecret = clientSecretRef.current?.value || clientSecret;
++      const liveClientSecret = getLiveClientSecret();
++      assertSecretForChangedClientId(liveClientSecret);
+       await save({
+         includeGoogleDrive: driveDirty || Boolean(liveClientSecret),
+         includeClientSecret: Boolean(liveClientSecret),
+         clientSecretOverride: liveClientSecret
+@@
+   const handleConnect = async () => {
+     setBusy('connect'); setMessage('');
+     try {
+-      const liveClientSecret = clientSecretRef.current?.value || clientSecret;
++      const liveClientSecret = getLiveClientSecret();
++      assertSecretForChangedClientId(liveClientSecret);
+       await save({
+         quiet: true,
+         includeSchedule: false,
+         includeGoogleDrive: true,
+         includeClientSecret: Boolean(liveClientSecret),
+         clientSecretOverride: liveClientSecret
+       });
