@@ -1,0 +1,18 @@
+diff --git a/frontend/src/components/Settings/DeveloperHubTab.jsx b/frontend/src/components/Settings/DeveloperHubTab.jsx
+--- a/frontend/src/components/Settings/DeveloperHubTab.jsx
++++ b/frontend/src/components/Settings/DeveloperHubTab.jsx
+@@
+   if (loading) return <Loading />;
+   const gh = status?.github || {}; const git = status?.git || {}; const running = operation?.status === 'running';
++  // V16: V15's compact excluded-files UI must never reference an undeclared
++  // variable. Keep all derived values in the component render scope and make
++  // them safe when preview/excluded is missing or malformed.
++  const excludedItems = Array.isArray(preview?.excluded) ? preview.excluded : [];
++  const excludedCount = Number.isFinite(Number(preview?.excludedCount))
++    ? Number(preview.excludedCount)
++    : excludedItems.length;
++  const excludedBackupCount = excludedItems.filter(
++    item => item?.reason === 'backup artifact is not allowed'
++  ).length;
++  const excludedOtherCount = Math.max(0, excludedCount - excludedBackupCount);
+   return <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
