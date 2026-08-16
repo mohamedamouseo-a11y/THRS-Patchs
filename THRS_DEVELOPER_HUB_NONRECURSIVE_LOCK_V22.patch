@@ -1,0 +1,38 @@
+diff --git a/backend/src/services/developerHubGit.service.js b/backend/src/services/developerHubGit.service.js
+--- a/backend/src/services/developerHubGit.service.js
++++ b/backend/src/services/developerHubGit.service.js
+@@ -37,15 +37,27 @@ async function runShell(command, timeout) { return run('/bin/bash', ['-lc', command], { cwd: REPO_ROOT, timeout: timeout || 600000 }); }
+ 
+ async function acquireLock() {
+   await fs.mkdir(path.dirname(LOCK_DIR), { recursive: true, mode: 0o700 });
+-  try { await fs.mkdir(LOCK_DIR); await fs.writeFile(path.join(LOCK_DIR, 'owner.json'), JSON.stringify({ pid: process.pid, at: new Date().toISOString() }), { mode: 0o600 }); }
+-  catch (error) {
+-    if (error.code !== 'EEXIST') throw error;
+-    const stat = await fs.stat(LOCK_DIR).catch(() => null);
+-    if (stat && Date.now() - stat.mtimeMs > 30 * 60 * 1000) { await fs.rm(LOCK_DIR, { recursive: true, force: true }); return acquireLock(); }
+-    const busy = new Error('Another GitHub operation is already running.'); busy.statusCode = 409; throw busy;
++  for (let attempt = 0; attempt < 2; attempt += 1) {
++    try {
++      await fs.mkdir(LOCK_DIR);
++      await fs.writeFile(
++        path.join(LOCK_DIR, 'owner.json'),
++        JSON.stringify({ pid: process.pid, at: new Date().toISOString() }),
++        { mode: 0o600 },
++      );
++      return async () => fs.rm(LOCK_DIR, { recursive: true, force: true });
++    } catch (error) {
++      if (error.code !== 'EEXIST') throw error;
++      const stat = await fs.stat(LOCK_DIR).catch(() => null);
++      const stale = !!stat && Date.now() - stat.mtimeMs > 30 * 60 * 1000;
++      if (attempt === 0 && stale) {
++        await fs.rm(LOCK_DIR, { recursive: true, force: true });
++        continue;
++      }
++      const busy = new Error('Another GitHub operation is already running.');
++      busy.statusCode = 409;
++      throw busy;
++    }
+   }
+-  return async () => fs.rm(LOCK_DIR, { recursive: true, force: true });
++  throw new Error('Failed to acquire GitHub operation lock.');
+ }
