@@ -1,0 +1,38 @@
+diff --git a/frontend/src/components/Settings/DeveloperHubTab.jsx b/frontend/src/components/Settings/DeveloperHubTab.jsx
+--- a/frontend/src/components/Settings/DeveloperHubTab.jsx
++++ b/frontend/src/components/Settings/DeveloperHubTab.jsx
+@@
+   const [commitMessage, setCommitMessage] = useState('');
+   const [webhook, setWebhook] = useState(null);
++  const [showExcludedDetails, setShowExcludedDetails] = useState(false);
+   const timer = useRef(null);
+@@
+   const review = async action => {
+     setPreview(null);
++    setShowExcludedDetails(false);
+     setOperation(null);
+@@
+   if (loading) return <Loading />;
+   const gh = status?.github || {}; const git = status?.git || {}; const running = operation?.status === 'running';
++  const excludedItems = preview?.excluded || [];
++  const excludedCount = preview?.excludedCount || excludedItems.length;
++  const excludedBackupCount = excludedItems.filter(item => item.reason === 'backup artifact is not allowed').length;
++  const excludedOtherCount = Math.max(0, excludedCount - excludedBackupCount);
+   return <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+@@
+-        {!!preview.excluded?.length && <div style={{ marginTop: 10, background: '#eff6ff', padding: 10, borderRadius: 7, color: '#1e3a8a' }}><strong>Safely excluded ({preview.excludedCount || preview.excluded.length})</strong>{preview.excluded.slice(0, 100).map((item, index) => <div key={`${item.path}-${index}`}>{item.path}: {item.reason}</div>)}</div>}
++        {!!excludedItems.length && <div style={{ marginTop: 10, background: '#eff6ff', padding: 10, borderRadius: 7, color: '#1e3a8a' }}>
++          <div style={{ display: 'flex', gap: 10, alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap' }}>
++            <strong>
++              Safely excluded: {excludedBackupCount ? `${excludedBackupCount} backup file${excludedBackupCount === 1 ? '' : 's'}` : `${excludedCount} file${excludedCount === 1 ? '' : 's'}`}
++              {excludedBackupCount && excludedOtherCount ? ` + ${excludedOtherCount} other` : ''}
++            </strong>
++            <Button variant="secondary" onClick={() => setShowExcludedDetails(value => !value)}>
++              {showExcludedDetails ? 'Hide details' : 'Details'}
++            </Button>
++          </div>
++          {showExcludedDetails && <div style={{ marginTop: 8, maxHeight: 220, overflow: 'auto', fontFamily: 'monospace', fontSize: 11 }}>
++            {excludedItems.slice(0, 200).map((item, index) => <div key={`${item.path}-${index}`}>{item.path}: {item.reason}</div>)}
++            {excludedCount > 200 && <div style={{ marginTop: 6, fontFamily: 'inherit' }}>Showing first 200 of {excludedCount} excluded files.</div>}
++          </div>}
++        </div>}
