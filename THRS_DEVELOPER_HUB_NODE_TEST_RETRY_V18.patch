@@ -1,0 +1,14 @@
+diff --git a/backend/src/services/developerHubGit.service.js b/backend/src/services/developerHubGit.service.js
+--- a/backend/src/services/developerHubGit.service.js
++++ b/backend/src/services/developerHubGit.service.js
+@@ -453,14 +453,35 @@ async function validateReview(preview) {
+   return true;
+ }
+ 
++function isNodeTestRunnerDeserializeError(error) {
++  const output = [
++    error?.message,
++    error?.result?.stdout,
++    error?.result?.stderr,
++  ].filter(Boolean).join('\n');
++  return /Unable to deserialize cloned data due to invalid or unsupported version\.?
