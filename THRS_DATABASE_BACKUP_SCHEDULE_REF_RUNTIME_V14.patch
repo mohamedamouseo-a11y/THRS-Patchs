@@ -1,0 +1,11 @@
+diff --git a/frontend/src/components/Settings/DatabaseBackupTab.jsx b/frontend/src/components/Settings/DatabaseBackupTab.jsx
+--- a/frontend/src/components/Settings/DatabaseBackupTab.jsx
++++ b/frontend/src/components/Settings/DatabaseBackupTab.jsx
+@@
+   const [clientSecret, setClientSecret] = useState('');
+   const [driveDirty, setDriveDirty] = useState(false);
+   const clientSecretRef = useRef(null);
++  // V14: some deployed DatabaseBackupTab builds reference scheduleTimeRef
++  // from buildPayload without declaring it, which makes Connect Google Drive
++  // fail at runtime before OAuth can start.
++  const scheduleTimeRef = useRef(null);
