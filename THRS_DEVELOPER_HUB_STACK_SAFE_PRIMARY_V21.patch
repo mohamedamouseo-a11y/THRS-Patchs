@@ -1,0 +1,16 @@
+diff --git a/backend/src/services/developerHubGit.service.js b/backend/src/services/developerHubGit.service.js
+--- a/backend/src/services/developerHubGit.service.js
++++ b/backend/src/services/developerHubGit.service.js
+@@ -566,14 +566,9 @@ async function execute({ preview, token, commitMessage, user, log, progress }) {
+-  try {
+-    await validateReview(preview);
+-  } catch (error) {
+-    if (!isMaximumCallStackError(error)) throw error;
+-    await log('Review validation: stack overflow detected; using stack-safe validator once', 'warning');
+-    await validateReviewStackSafe(preview);
+-  }
++  await log('Review validation: stack-safe validator running');
++  await validateReviewStackSafe(preview);
++  await log('Review validation: stack-safe validator passed', 'success');
+   if (preview.blocked?.length) throw new Error(`Execution blocked: ${preview.blocked[0].path}: ${preview.blocked[0].reason}`);
+   const release = await acquireLock();
