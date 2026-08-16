@@ -1,0 +1,72 @@
+diff --git a/frontend/src/components/Settings/DatabaseBackupTab.jsx b/frontend/src/components/Settings/DatabaseBackupTab.jsx
+--- a/frontend/src/components/Settings/DatabaseBackupTab.jsx
++++ b/frontend/src/components/Settings/DatabaseBackupTab.jsx
+@@
+   const buildPayload = ({
+     includeSchedule = true,
+     includeGoogleDrive = false,
+     includeClientSecret = false,
+     clientSecretOverride = ''
+   } = {}) => {
+-    const payload = {
+-      enabled: Boolean(form.enabled),
+-      scheduleTime: normalizeScheduleTime(scheduleTimeRef.current?.value || form.scheduleTime),
+-      timeZone: form.timeZone,
+-      retentionCount: Number(form.retentionCount || 3)
+-    };
++    // V12: build a truly isolated payload. When includeSchedule=false,
++    // no schedule fields are sent at all.
++    const payload = {};
++
++    if (includeSchedule) {
++      payload.enabled = Boolean(form.enabled);
++      payload.scheduleTime = normalizeScheduleTime(
++        scheduleTimeRef.current?.value || form.scheduleTime
++      );
++      payload.timeZone = form.timeZone;
++      payload.retentionCount = Number(form.retentionCount || 3);
++    }
+@@
+     if (includeGoogleDrive) {
+       payload.googleDrive = {
+         clientId: form.googleDrive.clientId,
+         redirectUri: form.googleDrive.redirectUri,
+         folderId: form.googleDrive.folderId,
+         folderName: form.googleDrive.folderName,
+         clientSecretAction: shouldSetClientSecret ? 'set' : 'keep',
+         ...(shouldSetClientSecret
+           ? { clientSecret: effectiveClientSecret }
+           : {})
+       };
+     }
+ 
+     return payload;
+   };
+diff --git a/backend/src/services/databaseBackup.service.js b/backend/src/services/databaseBackup.service.js
+--- a/backend/src/services/databaseBackup.service.js
++++ b/backend/src/services/databaseBackup.service.js
+@@
+-  if (next.enabled) {
++  // V12: only block a request that explicitly tries to enable automatic
++  // backups before Google Drive is connected. OAuth credential-only saves
++  // must remain possible even if an older config already has enabled=true.
++  const enableRequested =
++    Object.prototype.hasOwnProperty.call(input, 'enabled') &&
++    Boolean(input.enabled);
++
++  if (enableRequested) {
+     if (!encryptionReady()) {
+       throw new DatabaseBackupError(
+         'Database backup encryption is not configured.',
+         400,
+         'ENCRYPTION_NOT_CONFIGURED'
+       );
+     }
+     if (!next.googleDrive.refreshTokenEnc) {
+       throw new DatabaseBackupError(
+         'Connect the dedicated Google Drive before enabling automatic backups.',
+         400,
+         'DRIVE_NOT_CONNECTED'
+       );
+     }
+   }
