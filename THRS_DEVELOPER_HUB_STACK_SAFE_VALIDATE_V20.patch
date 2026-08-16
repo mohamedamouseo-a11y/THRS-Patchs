@@ -1,0 +1,98 @@
+diff --git a/backend/src/services/developerHubGit.service.js b/backend/src/services/developerHubGit.service.js
+--- a/backend/src/services/developerHubGit.service.js
++++ b/backend/src/services/developerHubGit.service.js
+@@ -453,6 +453,72 @@ async function validateReview(preview) {
+   return true;
+ }
+ 
++function isMaximumCallStackError(error) {
++  return error instanceof RangeError || String(error?.message || '').includes('Maximum call stack size exceeded');
++}
++
++async function validateReviewStackSafe(preview) {
++  if (!preview || Date.parse(preview.expiresAt) < Date.now()) throw new Error('Review expired. Run Review again.');
++
++  const branch = assertBranchName(preview.branch);
++  const reviewedFiles = Array.isArray(preview.files) ? preview.files : [];
++  const reviewedPaths = [];
++  const seen = new Set();
++  for (const entry of reviewedFiles) {
++    for (const filePath of [entry?.path, entry?.originalPath]) {
++      if (!filePath || seen.has(filePath)) continue;
++      seen.add(filePath);
++      reviewedPaths.push(filePath);
++    }
++  }
++
++  const currentHead = await runGit(['rev-parse', 'HEAD'], { reject: false });
++  if ((currentHead.stdout || null) !== (preview.snapshot?.head || null)) {
++    throw new Error('Local commit changed after review. Run Review again.');
++  }
++
++  const currentRemote = await runGit(['rev-parse', `refs/remotes/origin/${branch}`], { reject: false });
++  const actualRemote = currentRemote.ok ? (currentRemote.stdout || null) : null;
++  if (actualRemote !== (preview.snapshot?.remote || null)) {
++    throw new Error('Remote tracking reference changed after review. Run Review again.');
++  }
++
++  const changed = await collectChangedFiles(branch);
++  const trackedPaths = await getTrackedPaths();
++  const classification = classifyChangedEntries(changed.entries, trackedPaths, false);
++  if (classification.blocked.length) {
++    const finding = classification.blocked[0];
++    throw new Error(`Execution blocked: ${finding.path}: ${finding.reason}`);
++  }
++  const pathComparison = compareReviewedPathSet(reviewedFiles, classification.stageableEntries);
++  if (!pathComparison.same) {
++    const changedPath = pathComparison.added[0] || pathComparison.removed[0] || '(unknown path)';
++    throw new Error(`Repository changed after review (${changedPath}). Run Review again.`);
++  }
++
++  const expectedWorkTree = new Map();
++  for (const item of Array.isArray(preview.snapshot?.workTree) ? preview.snapshot.workTree : []) {
++    if (item?.path) expectedWorkTree.set(item.path, item);
++  }
++  for (const relative of reviewedPaths) {
++    const absolute = path.resolve(REPO_ROOT, relative);
++    if (!absolute.startsWith(REPO_ROOT + path.sep)) throw new Error('Reviewed path escapes repository.');
++    const expected = expectedWorkTree.get(relative);
++    let actual;
++    try {
++      const stat = fsSync.lstatSync(absolute);
++      if (!stat.isFile()) actual = { path: relative, type: stat.isSymbolicLink() ? 'symlink' : 'other', size: stat.size };
++      else actual = { path: relative, size: stat.size, mode: stat.mode, digest: crypto.createHash('sha256').update(fsSync.readFileSync(absolute)).digest('hex') };
++    } catch (error) {
++      actual = { path: relative, missing: true, code: error.code || null };
++    }
++    if (!expected
++      || expected.size !== actual.size
++      || expected.mode !== actual.mode
++      || expected.digest !== actual.digest
++      || expected.type !== actual.type
++      || !!expected.missing !== !!actual.missing) {
++      throw new Error(`Reviewed file changed after review: ${relative}. Run Review again.`);
++    }
++  }
++
++  const scan = scanFiles(REPO_ROOT, reviewedPaths);
++  if (scan.blocked.length || scan.secrets.length) {
++    const finding = scan.blocked[0] || { path: scan.secrets[0].path, reason: 'high-confidence secret detected' };
++    throw new Error(`Security scan blocked execution: ${finding.path}: ${finding.reason || 'secret detected'}`);
++  }
++  return true;
++}
++
+ async function runGates(log) {
+   const gates = [
+     ['Verify', process.env.DEV_HUB_VERIFY_COMMAND || 'npm --prefix backend run check:syntax', 6 * 60_000],
+@@ -500,7 +566,14 @@ async function execute({ preview, token, commitMessage, user, log, progress }) {
+-  await validateReview(preview);
++  try {
++    await validateReview(preview);
++  } catch (error) {
++    if (!isMaximumCallStackError(error)) throw error;
++    await log('Review validation: stack overflow detected; using stack-safe validator once', 'warning');
++    await validateReviewStackSafe(preview);
++  }
+   if (preview.blocked?.length) throw new Error(`Execution blocked: ${preview.blocked[0].path}: ${preview.blocked[0].reason}`);
+   const release = await acquireLock();
