@@ -1,0 +1,12 @@
+diff --git a/frontend/src/components/Settings/DeveloperHubTab.jsx b/frontend/src/components/Settings/DeveloperHubTab.jsx
+--- a/frontend/src/components/Settings/DeveloperHubTab.jsx
++++ b/frontend/src/components/Settings/DeveloperHubTab.jsx
+@@
+   const [operation, setOperation] = useState(null);
+   const [commitMessage, setCommitMessage] = useState('');
+   const [webhook, setWebhook] = useState(null);
++  // V17: V15 renders the compact excluded-files details toggle. Some live
++  // deployments received the JSX without this state declaration, causing
++  // `showExcludedDetails is not defined` after Review Push.
++  const [showExcludedDetails, setShowExcludedDetails] = useState(false);
+   const timer = useRef(null);
