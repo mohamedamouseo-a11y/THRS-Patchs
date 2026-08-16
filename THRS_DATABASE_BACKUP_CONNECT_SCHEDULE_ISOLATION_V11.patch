@@ -1,0 +1,24 @@
+diff --git a/frontend/src/components/Settings/DatabaseBackupTab.jsx b/frontend/src/components/Settings/DatabaseBackupTab.jsx
+--- a/frontend/src/components/Settings/DatabaseBackupTab.jsx
++++ b/frontend/src/components/Settings/DatabaseBackupTab.jsx
+@@
+   const handleConnect = async () => {
+     setBusy('connect'); setMessage('');
+     try {
+       const liveClientSecret = getLiveClientSecret();
+       assertSecretForChangedClientId(liveClientSecret);
+-      await save({ quiet: true, includeClientSecret: true });
++      // V11: OAuth connection must not submit/validate the automatic-backup
++      // schedule before Google has returned a refresh token. Otherwise an
++      // already-enabled schedule causes DRIVE_NOT_CONNECTED and blocks OAuth.
++      await save({
++        quiet: true,
++        includeSchedule: false,
++        includeGoogleDrive: true,
++        includeClientSecret: Boolean(liveClientSecret),
++        clientSecretOverride: liveClientSecret
++      });
+ 
+       const auth = unwrapApiData(await api.get('/settings/database-backups/oauth/url'));
+       if (!auth?.url) throw new Error('Google OAuth URL was not returned by the server.');
+       window.location.assign(auth.url);
