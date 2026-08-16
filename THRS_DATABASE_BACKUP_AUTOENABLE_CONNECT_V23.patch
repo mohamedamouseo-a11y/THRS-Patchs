@@ -1,0 +1,60 @@
+diff --git a/frontend/src/components/Settings/DatabaseBackupTab.jsx b/frontend/src/components/Settings/DatabaseBackupTab.jsx
+--- a/frontend/src/components/Settings/DatabaseBackupTab.jsx
++++ b/frontend/src/components/Settings/DatabaseBackupTab.jsx
+@@
+ const gridStyle = { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 14 };
+ const noteStyle = { padding: 12, borderRadius: 8, background: 'var(--bg-secondary)', color: 'var(--text-secondary)', fontSize: 13, lineHeight: 1.6 };
+ const dangerStyle = { padding: 14, borderRadius: 8, border: '1px solid #dc2626', background: 'rgba(220,38,38,.08)' };
++const AUTO_ENABLE_AFTER_CONNECT_KEY = 'thrs_db_backup_enable_after_connect';
+@@
+   const load = async () => {
+     try {
+       const res = await api.get('/settings/database-backups/status');
+-      const next = unwrapApiData(res);
++      let next = unwrapApiData(res);
++
++      const shouldAutoEnable = sessionStorage.getItem(AUTO_ENABLE_AFTER_CONNECT_KEY) === '1';
++      if (shouldAutoEnable && next?.config?.googleDrive?.connected) {
++        try {
++          if (!next.config.enabled) {
++            await api.put('/settings/database-backups/settings', { enabled: true });
++            const refreshed = await api.get('/settings/database-backups/status');
++            next = unwrapApiData(refreshed);
++          }
++          sessionStorage.removeItem(AUTO_ENABLE_AFTER_CONNECT_KEY);
++          setMessage('Google Drive connected and daily automatic backup enabled.');
++        } catch (reenableError) {
++          sessionStorage.removeItem(AUTO_ENABLE_AFTER_CONNECT_KEY);
++          setMessage(`Google Drive connected, but automatic backup could not be re-enabled: ${reenableError?.message || 'Unknown error'}`);
++        }
++      }
+@@
+     const oauthError = sessionStorage.getItem('thrs_db_backup_oauth_error');
+     if (oauthError) {
+       sessionStorage.removeItem('thrs_db_backup_oauth_error');
++      sessionStorage.removeItem(AUTO_ENABLE_AFTER_CONNECT_KEY);
+       setMessage(`Google Drive connection failed: ${oauthError}`);
+@@
+-  const save = async ({ quiet = false, includeClientSecret = false } = {}) => {
++  const save = async ({ quiet = false, includeClientSecret = false, enabledOverride } = {}) => {
+     const requestPayload = buildPayload({ includeClientSecret });
++    if (typeof enabledOverride === 'boolean') requestPayload.enabled = enabledOverride;
+@@
+   const handleConnect = async () => {
+     setBusy('connect'); setMessage('');
+     try {
++      // Save OAuth settings with automatic backup temporarily disabled so the
++      // backend does not require an existing Drive refresh token before OAuth.
++      if (form.enabled) sessionStorage.setItem(AUTO_ENABLE_AFTER_CONNECT_KEY, '1');
++      else sessionStorage.removeItem(AUTO_ENABLE_AFTER_CONNECT_KEY);
++
+       // Only Connect/Reconnect may persist a newly entered OAuth client secret.
+       // Normal Save Settings always keeps the already stored server-side secret.
+-      await save({ quiet: true, includeClientSecret: true });
++      await save({ quiet: true, includeClientSecret: true, enabledOverride: false });
+       const res = await api.get('/settings/database-backups/google-drive/auth-url');
+       const auth = unwrapApiData(res);
+       window.location.assign(auth.url);
+     } catch (error) {
++      sessionStorage.removeItem(AUTO_ENABLE_AFTER_CONNECT_KEY);
+       setMessage(error?.message || 'Could not start Google Drive connection.');
