@@ -1,0 +1,68 @@
+diff --git a/backend/src/services/developerHubGit.service.js b/backend/src/services/developerHubGit.service.js
+--- a/backend/src/services/developerHubGit.service.js
++++ b/backend/src/services/developerHubGit.service.js
+@@ -426,34 +426,59 @@ async function collectCurrentInitialSnapshotEntries() {
+ }
+ 
+ async function validateReview(preview) {
+   if (!preview || Date.parse(preview.expiresAt) < Date.now()) throw new Error('Review expired. Run Review again.');
++  const reviewedFiles = Array.isArray(preview.files) ? preview.files : [];
+ 
+   // Initial clean pushes are intentionally content-tolerant between Review and Execute.
+   // THRS background jobs may touch safe source files, while the file set remains unchanged.
+   // The current content is scanned again here and again after Verify/Tests/Build before push.
+   if (preview.expectedAction === 'clean_snapshot_and_push' && preview.remoteExists === false) {
+     const currentHead = await runGit(['rev-parse', 'HEAD'], { reject: false });
+     if ((currentHead.stdout || null) !== (preview.snapshot?.head || null)) {
+       throw new Error('Local commit changed after review. Run Review again.');
+     }
+     const currentEntries = await collectCurrentInitialSnapshotEntries();
+-    const pathComparison = compareReviewedPathSet(preview.files, currentEntries);
++    const pathComparison = compareReviewedPathSet(reviewedFiles, currentEntries);
+     if (!pathComparison.same) {
+       const changedPath = pathComparison.added[0] || pathComparison.removed[0] || '(unknown path)';
+       const changeType = pathComparison.added.length ? 'added' : 'removed';
+       throw new Error(`Safe source file set changed after review (${changeType}: ${changedPath}). Run Review again.`);
+     }
+     return true;
+   }
+ 
+-  const workPaths = preview.files.flatMap(entry => [entry.path, entry.originalPath].filter(Boolean));
+-  const snapshot = await stateSnapshot(preview.branch, workPaths, preview.files);
+-  const fingerprint = createPreviewFingerprint({ action: preview.action, repo: preview.repo, branch: preview.branch, snapshot, expectedAction: preview.expectedAction, files: preview.files, localAhead: preview.localAhead, remoteAhead: preview.remoteAhead, remoteExists: preview.remoteExists });
++  const workPaths = reviewedFiles.flatMap(entry => [entry.path, entry.originalPath].filter(Boolean));
++  const snapshot = await stateSnapshot(preview.branch, workPaths, reviewedFiles);
++  const fingerprint = createPreviewFingerprint({ action: preview.action, repo: preview.repo, branch: preview.branch, snapshot, expectedAction: preview.expectedAction, files: reviewedFiles, localAhead: preview.localAhead, remoteAhead: preview.remoteAhead, remoteExists: preview.remoteExists });
+   if (fingerprint !== preview.fingerprint) throw new Error('Repository changed after review. Run Review again.');
+   return true;
+ }
+ 
++function isNodeTestRunnerDeserializeError(error) {
++  const output = [
++    error?.message,
++    error?.result?.stdout,
++    error?.result?.stderr,
++  ].filter(Boolean).join('\n');
++  return output.includes('Unable to deserialize cloned data due to invalid or unsupported version.');
++}
++
+ async function runGates(log) {
+   const gates = [
+     ['Verify', process.env.DEV_HUB_VERIFY_COMMAND || 'npm --prefix backend run check:syntax', 6 * 60_000],
+     ['Tests', process.env.DEV_HUB_TEST_COMMAND || 'npm --prefix backend test', 10 * 60_000],
+     ['Build', process.env.DEV_HUB_BUILD_COMMAND || 'CI=false npm --prefix frontend run build', 15 * 60_000],
+   ];
+   for (const [label, command, timeout] of gates) {
+     await log(`${label}: running`);
+-    const result = await runShell(command, timeout);
++    let result;
++    try {
++      result = await runShell(command, timeout);
++    } catch (error) {
++      if (label !== 'Tests' || !isNodeTestRunnerDeserializeError(error)) throw error;
++      await log('Tests: retrying once after Node test-runner IPC deserialization failure', 'warning');
++      result = await runShell(command, timeout);
++    }
+     await log(`${label}: passed${result.stdout ? ` — ${result.stdout.split('\n').slice(-1)[0].slice(0, 180)}` : ''}`, 'success');
+   }
+ }
