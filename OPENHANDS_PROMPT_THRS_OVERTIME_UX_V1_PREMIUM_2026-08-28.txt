@@ -1,0 +1,121 @@
+TASK: Apply THRS Overtime Management UX/UI V1 to the EXISTING live THRS deployment.
+
+Patch repository:
+https://github.com/mohamedamouseo-a11y/THRS-Patchs.git
+
+Patch artifact:
+THRS_OVERTIME_UX_V1_PREMIUM_2026-08-28.patch
+
+Exact patch commit:
+f6d34ea77a86df20dfb4bfe3ead17fa5d99f5f78
+
+Live project:
+/var/www/tamiyouz_hr
+
+GOAL
+Upgrade ONLY the Overtime Management frontend UX/UI while preserving all existing overtime APIs, calculations, permissions, request submission, approve/reject behavior, source-system rules, modals, and payroll-rate values.
+
+EXPECTED UX AFTER PATCH
+- Premium Tamiyouz navy/gold hero with Request Overtime CTA.
+- Four operational KPI cards: Pending Requests, Approved Hours, Rejected, Total Hours, all derived from already-loaded real request data.
+- Requests / Monthly Summary tabs so both large sections are not stacked vertically.
+- Frontend-only request filters: employee/reason search, status, month, and clear filters.
+- Frontend-only pagination with 10 / 25 / 50 rows per page.
+- Cleaner request table with employee initials, compact hours/date, two-line reason clamp, stronger status badges, clearer pending/rejected row tones, and existing Approve/Reject actions preserved.
+- Monthly Summary converted from a very long vertical card list into a compact responsive grid with a bounded internal scroll area.
+- Overtime Rate Configuration becomes a compact reference card.
+- Responsive layout for desktop/tablet/mobile.
+
+HARD SAFETY RULES
+- UI/frontend task only.
+- DO NOT change backend files.
+- DO NOT change overtime API routes or controller logic.
+- DO NOT change DB data, Prisma schema, migrations, payroll calculations, auth, permissions, Nginx config, DNS, SSL, ports, PM2 config, environment variables, or unrelated files.
+- DO NOT reset, clean, checkout, or overwrite unrelated local changes.
+- DO NOT use git add ., git add -A, reset --hard, clean, --3way, --reject, or fuzzy/manual patch recreation.
+- DO NOT commit.
+- DO NOT push.
+
+EXPECTED TARGET FILE BASE
+frontend/src/pages/OvertimeManagement.jsx
+Expected pre-patch blob SHA:
+9dbcb4e473c2fe74312ffa0cd3ac1eb5a71d153c
+
+EXPECTED PATCH CHANGES ONLY
+1) frontend/src/pages/OvertimeManagement.jsx
+2) frontend/src/styles/thrs-overtime-v1-premium.css (new)
+
+EXECUTION
+1. cd /var/www/tamiyouz_hr
+2. Record:
+   git rev-parse HEAD
+   git status --short
+3. Verify the target page has no pre-existing local edits:
+   git diff --quiet -- frontend/src/pages/OvertimeManagement.jsx
+   If this is non-zero: STOP and report the diff. Do not overwrite it.
+4. Verify the exact target blob:
+   git hash-object frontend/src/pages/OvertimeManagement.jsx
+   It must equal:
+   9dbcb4e473c2fe74312ffa0cd3ac1eb5a71d153c
+   If not: STOP.
+5. Verify frontend/src/styles/thrs-overtime-v1-premium.css does not already exist. If it exists: STOP unless its content is already exactly the V1 patch result.
+6. Fetch/clone THRS-Patchs into a separate temporary directory and checkout exact commit:
+   f6d34ea77a86df20dfb4bfe3ead17fa5d99f5f78
+7. Copy ONLY the patch artifact into a safe temporary location. Do not copy any source files into the live repo.
+8. From /var/www/tamiyouz_hr run:
+   git apply --numstat /path/to/THRS_OVERTIME_UX_V1_PREMIUM_2026-08-28.patch
+   git apply --check /path/to/THRS_OVERTIME_UX_V1_PREMIUM_2026-08-28.patch
+9. BOTH commands must succeed. Expected numstat is exactly two files:
+   frontend/src/pages/OvertimeManagement.jsx
+   frontend/src/styles/thrs-overtime-v1-premium.css
+10. If either command fails: STOP. DO NOT manually reproduce the patch. DO NOT use --3way or --reject.
+11. Apply exactly once:
+   git apply /path/to/THRS_OVERTIME_UX_V1_PREMIUM_2026-08-28.patch
+12. Verify:
+   git status --short frontend/src/pages/OvertimeManagement.jsx frontend/src/styles/thrs-overtime-v1-premium.css
+   git diff --check -- frontend/src/pages/OvertimeManagement.jsx frontend/src/styles/thrs-overtime-v1-premium.css
+13. Confirm no files outside those two were changed by this task.
+14. Build the frontend using the existing project production build procedure. Preferred command if current project still uses react-scripts:
+   cd /var/www/tamiyouz_hr/frontend
+   CI=false npm run build
+15. Deploy/reload ONLY using the installation's existing frontend deployment method. Do not change Nginx configuration. Do not restart backend/PM2 unless the existing frontend deployment mechanism genuinely requires it; this patch contains no backend changes.
+16. Smoke test:
+   https://hr.tamiyouzplaform.com/overtime => HTTP 200
+   https://hr.tamiyouzplaform.com/ => HTTP 200
+17. Functional non-destructive validation:
+   - Existing overtime data loads.
+   - Request Overtime modal opens; DO NOT submit a test request.
+   - Requests tab is default.
+   - Search, Status, Month, Clear filters work client-side.
+   - Page-size 10/25/50 and Previous/Next pagination work client-side.
+   - Monthly Summary tab switches without page reload and displays the same real summary values in compact cards.
+   - Existing pending rows still expose Approve/Reject only where the original permission/source-system logic allows them. DO NOT approve/reject real records for testing.
+   - Rate values still show the existing 1.5x / 2x state values (or whatever real values the current page supplies) without changing calculations.
+18. Visual validation if browser capability exists:
+   - Hero and four KPIs visible above the fold.
+   - Content width uses desktop space better.
+   - Requests and Monthly Summary are separate tabs.
+   - Request table reasons are visually clamped to two lines.
+   - Monthly Summary no longer creates the huge full-page vertical stack.
+   - Mobile/tablet layout remains usable.
+19. DO NOT commit.
+20. DO NOT push.
+21. Leave the source changes local for visual review by the user.
+
+FINAL REPORT MUST INCLUDE
+- HEAD before
+- target blob SHA verification
+- backup path if one was created
+- git apply --numstat result
+- git apply --check result
+- files changed
+- git diff --check result
+- frontend build result
+- deployment/reload action used
+- HTTP smoke results
+- functional validation results
+- final git status for the two target files
+- confirmation no backend/DB/Prisma/Nginx/DNS/SSL/ports/auth/PM2-config changes
+- confirmation no commit and no push
+
+FINAL_MARKER=THRS_OVERTIME_UX_V1_DEPLOYED_OK
