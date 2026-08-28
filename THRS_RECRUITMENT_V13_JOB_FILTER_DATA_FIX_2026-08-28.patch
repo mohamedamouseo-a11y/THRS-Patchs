@@ -35,7 +35,8 @@ diff --git a/backend/src/controllers/recruitment.controller.js b/backend/src/con
 diff --git a/frontend/src/pages/Recruitment.jsx b/frontend/src/pages/Recruitment.jsx
 --- a/frontend/src/pages/Recruitment.jsx
 +++ b/frontend/src/pages/Recruitment.jsx
-@@ -559,7 +559,8 @@ const Recruitment = () => {
+@@ -556,10 +556,11 @@ const Recruitment = () => {
+   const [selectedApp, setSelectedApp] = useState(null);
    const [showDetailModal, setShowDetailModal] = useState(false);
    const [detailQueryId, setDetailQueryId] = useState(() => searchParams.get('id') || '');
    const [showJobModal, setShowJobModal] = useState(false);
@@ -44,7 +45,10 @@ diff --git a/frontend/src/pages/Recruitment.jsx b/frontend/src/pages/Recruitment
    const [editingJob, setEditingJob] = useState(null);
    const [jobForm, setJobForm] = useState(DEFAULT_JOB_FORM);
    const [jobEditorMode, setJobEditorMode] = useState('description');
-@@ -595,12 +596,13 @@ const Recruitment = () => {
+ 
+@@ -591,15 +592,16 @@ const Recruitment = () => {
+   }));
+ 
    const fetchStatsAndJobs = useCallback(async () => {
      try {
        const [statsRes, jobsRes] = await Promise.all([
@@ -58,7 +62,15 @@ diff --git a/frontend/src/pages/Recruitment.jsx b/frontend/src/pages/Recruitment
        console.error('Failed to fetch recruitment stats/jobs:', error);
      }
    }, []);
-@@ -1053,3 +1055,7 @@ const Recruitment = () => {
+ 
+@@ -1046,15 +1048,19 @@ const Recruitment = () => {
+       await api.delete(`/recruitment/jobs/${job.id}`);
+       fetchStatsAndJobs();
+     } catch (error) {
+       uiAlert(error.message || pageCopy.deleteJobFailed);
+     }
+   };
+ 
    const jobTitleOptions = Array.from(new Set(
 -    jobs.map(j => j.title).filter(Boolean).concat(positionFilter ? [positionFilter] : [])
 -  ));
@@ -68,3 +80,7 @@ diff --git a/frontend/src/pages/Recruitment.jsx b/frontend/src/pages/Recruitment
 +      .map(title => String(title || '').trim())
 +      .filter(Boolean)
 +  )).sort((a, b) => a.localeCompare(b, langKey === 'ar' ? 'ar' : 'en', { sensitivity: 'base' }));
+ 
+   const appColumns = [
+     {
+       header: pageCopy.table.headers.applicant,
