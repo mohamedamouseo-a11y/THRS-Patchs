@@ -1,0 +1,953 @@
+diff --git a/backend/prisma/schema.prisma b/backend/prisma/schema.prisma
+--- a/backend/prisma/schema.prisma
++++ b/backend/prisma/schema.prisma
+@@ -1,17 +1,44 @@
+ model AuditLog {
+-  id     String @id @default(uuid())
+-  userId String
+-  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
++  id     String  @id @default(uuid())
++  userId String?
++  user   User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
+ 
+-  action   String // LOGIN, CREATE_EMPLOYEE, etc.
+-  entity   String? // EMPLOYEE, LEAVE, etc.
++  // Immutable actor snapshot. Kept even if the user is later removed/renamed.
++  actorName  String?
++  actorEmail String?
++  actorRole  String?
++
++  // Normalized central-audit taxonomy.
++  action   String
++  module   String  @default("SYSTEM")
++  entity   String?
+   entityId String?
+-  changes  Json?
++  summary  String?
++
++  // Phase 1 stores the sanitized request under changes.
++  // beforeState/afterState are reserved for the later Undo Engine.
++  changes     Json?
++  beforeState Json?
++  afterState  Json?
++  metadata    Json?
++
++  requestId  String?
++  method     String?
++  route      String?
++  outcome    String  @default("SUCCESS")
++  statusCode Int?
++  source     String  @default("WEB")
++  reversible Boolean @default(false)
+ 
+   ipAddress String?
+   userAgent String?
+ 
+   createdAt DateTime @default(now())
+ 
++  @@index([createdAt])
++  @@index([userId, createdAt])
++  @@index([module, action, createdAt])
++  @@index([entity, entityId])
++  @@index([requestId])
+   @@map("audit_logs")
+ }
+diff --git a/backend/prisma/migrations/20260829000100_central_audit_backbone/migration.sql b/backend/prisma/migrations/20260829000100_central_audit_backbone/migration.sql
+new file mode 100644
+--- /dev/null
++++ b/backend/prisma/migrations/20260829000100_central_audit_backbone/migration.sql
+@@ -0,0 +1,43 @@
++-- THRS Central Audit Backbone — Phase 1
++-- Evolves the existing audit_logs table in-place so legacy history is preserved.
++
++ALTER TABLE "audit_logs"
++  DROP CONSTRAINT IF EXISTS "audit_logs_userId_fkey";
++
++ALTER TABLE "audit_logs"
++  ALTER COLUMN "userId" DROP NOT NULL,
++  ADD COLUMN IF NOT EXISTS "actorName" TEXT,
++  ADD COLUMN IF NOT EXISTS "actorEmail" TEXT,
++  ADD COLUMN IF NOT EXISTS "actorRole" TEXT,
++  ADD COLUMN IF NOT EXISTS "module" TEXT NOT NULL DEFAULT 'SYSTEM',
++  ADD COLUMN IF NOT EXISTS "summary" TEXT,
++  ADD COLUMN IF NOT EXISTS "beforeState" JSONB,
++  ADD COLUMN IF NOT EXISTS "afterState" JSONB,
++  ADD COLUMN IF NOT EXISTS "metadata" JSONB,
++  ADD COLUMN IF NOT EXISTS "requestId" TEXT,
++  ADD COLUMN IF NOT EXISTS "method" TEXT,
++  ADD COLUMN IF NOT EXISTS "route" TEXT,
++  ADD COLUMN IF NOT EXISTS "outcome" TEXT NOT NULL DEFAULT 'SUCCESS',
++  ADD COLUMN IF NOT EXISTS "statusCode" INTEGER,
++  ADD COLUMN IF NOT EXISTS "source" TEXT NOT NULL DEFAULT 'WEB',
++  ADD COLUMN IF NOT EXISTS "reversible" BOOLEAN NOT NULL DEFAULT false;
++
++ALTER TABLE "audit_logs"
++  ADD CONSTRAINT "audit_logs_userId_fkey"
++  FOREIGN KEY ("userId") REFERENCES "users"("id")
++  ON DELETE SET NULL ON UPDATE CASCADE;
++
++CREATE INDEX IF NOT EXISTS "audit_logs_createdAt_idx"
++  ON "audit_logs"("createdAt");
++
++CREATE INDEX IF NOT EXISTS "audit_logs_userId_createdAt_idx"
++  ON "audit_logs"("userId", "createdAt");
++
++CREATE INDEX IF NOT EXISTS "audit_logs_module_action_createdAt_idx"
++  ON "audit_logs"("module", "action", "createdAt");
++
++CREATE INDEX IF NOT EXISTS "audit_logs_entity_entityId_idx"
++  ON "audit_logs"("entity", "entityId");
++
++CREATE INDEX IF NOT EXISTS "audit_logs_requestId_idx"
++  ON "audit_logs"("requestId");
+diff --git a/backend/src/services/audit.service.js b/backend/src/services/audit.service.js
+new file mode 100644
+--- /dev/null
++++ b/backend/src/services/audit.service.js
+@@ -0,0 +1,146 @@
++'use strict';
++
++const prisma = require('../config/database');
++
++const SENSITIVE_KEY = /(password|passcode|token|secret|authorization|cookie|session|signature|api[-_]?key|clientSecret|refreshToken|resetToken)/i;
++const MAX_DEPTH = 5;
++const MAX_ARRAY = 50;
++const MAX_OBJECT_KEYS = 100;
++const MAX_STRING = 2000;
++
++function sanitizeForAudit(value, depth = 0) {
++  if (value === null || value === undefined) return value;
++  if (depth > MAX_DEPTH) return '[TRUNCATED_DEPTH]';
++
++  if (typeof value === 'string') {
++    return value.length > MAX_STRING ? `${value.slice(0, MAX_STRING)}…[TRUNCATED]` : value;
++  }
++
++  if (typeof value === 'number' || typeof value === 'boolean') return value;
++  if (value instanceof Date) return value.toISOString();
++
++  if (Array.isArray(value)) {
++    const trimmed = value.slice(0, MAX_ARRAY).map((entry) => sanitizeForAudit(entry, depth + 1));
++    if (value.length > MAX_ARRAY) trimmed.push(`[${value.length - MAX_ARRAY} MORE ITEMS]`);
++    return trimmed;
++  }
++
++  if (typeof value === 'object') {
++    const output = {};
++    Object.entries(value).slice(0, MAX_OBJECT_KEYS).forEach(([key, entry]) => {
++      output[key] = SENSITIVE_KEY.test(key) ? '[REDACTED]' : sanitizeForAudit(entry, depth + 1);
++    });
++    if (Object.keys(value).length > MAX_OBJECT_KEYS) output.__truncatedKeys = true;
++    return output;
++  }
++
++  return String(value);
++}
++
++function clientIp(req) {
++  const forwarded = String(req.headers?.['x-forwarded-for'] || '').split(',')[0].trim();
++  return forwarded || req.ip || req.socket?.remoteAddress || null;
++}
++
++function actorSnapshot(req) {
++  const user = req.user || {};
++  const name = [user.firstName, user.lastName].filter(Boolean).join(' ').trim();
++  return {
++    userId: user.id && user.id !== 'TOS_INTEGRATION' ? user.id : null,
++    actorName: name || user.email || (req.isTosIntegration ? 'TOS Integration' : null),
++    actorEmail: user.email || null,
++    actorRole: user.role || null,
++    source: req.isTosIntegration ? 'TOS_INTEGRATION' : 'WEB',
++  };
++}
++
++function normalizeRoute(req) {
++  return String(req.originalUrl || req.url || '').split('?')[0] || '/';
++}
++
++function inferContext(req) {
++  const route = normalizeRoute(req);
++  const parts = route.replace(/^\/api\/v1\/?/, '').split('/').filter(Boolean);
++  const moduleName = String(parts[0] || 'system').replace(/[^a-zA-Z0-9]+/g, '_').toUpperCase();
++  const idPattern = /^(?:\d+|[0-9a-f]{8}-[0-9a-f-]{27,})$/i;
++  const semanticPattern = /^(approve|reject|run|generate|send|publish|close|cancel|restore|sync|release|pay|recalculate)$/i;
++
++  let entityId = null;
++  for (let index = parts.length - 1; index >= 1; index -= 1) {
++    if (idPattern.test(parts[index])) {
++      entityId = parts[index];
++      break;
++    }
++  }
++
++  let entityToken = parts[0] || 'system';
++  for (let index = parts.length - 1; index >= 1; index -= 1) {
++    const candidate = parts[index];
++    if (!idPattern.test(candidate) && !semanticPattern.test(candidate)) {
++      entityToken = candidate;
++      break;
++    }
++  }
++  const entity = String(entityToken).replace(/[^a-zA-Z0-9]+/g, '_').toUpperCase();
++
++  const method = String(req.method || 'UNKNOWN').toUpperCase();
++  let action = 'ACTION';
++  if (method === 'POST') action = 'CREATE';
++  if (method === 'PUT' || method === 'PATCH') action = 'UPDATE';
++  if (method === 'DELETE') action = 'DELETE';
++
++  const semanticAction = parts[parts.length - 1];
++  if (
++    ['POST', 'PUT', 'PATCH'].includes(method)
++    && semanticAction
++    && semanticPattern.test(semanticAction)
++  ) {
++    action = semanticAction.replace(/[^a-zA-Z0-9]+/g, '_').toUpperCase();
++  }
++
++  return { route, moduleName, entity, entityId, method, action };
++}
++
++async function recordAuditEvent(input) {
++  try {
++    return await prisma.auditLog.create({
++      data: {
++        userId: input.userId || null,
++        actorName: input.actorName || null,
++        actorEmail: input.actorEmail || null,
++        actorRole: input.actorRole || null,
++        action: input.action || 'ACTION',
++        module: input.module || 'SYSTEM',
++        entity: input.entity || null,
++        entityId: input.entityId ? String(input.entityId) : null,
++        summary: input.summary || null,
++        changes: sanitizeForAudit(input.changes),
++        beforeState: sanitizeForAudit(input.beforeState),
++        afterState: sanitizeForAudit(input.afterState),
++        metadata: sanitizeForAudit(input.metadata),
++        requestId: input.requestId || null,
++        method: input.method || null,
++        route: input.route || null,
++        outcome: input.outcome || 'SUCCESS',
++        statusCode: Number.isInteger(input.statusCode) ? input.statusCode : null,
++        source: input.source || 'WEB',
++        reversible: Boolean(input.reversible),
++        ipAddress: input.ipAddress || null,
++        userAgent: input.userAgent || null,
++      },
++    });
++  } catch (error) {
++    // Audit logging is fail-open in Phase 1: business operations must never fail
++    // merely because the ledger could not be written. Surface the failure to logs.
++    console.error('[CENTRAL_AUDIT_WRITE_FAILED]', error?.message || error);
++    return null;
++  }
++}
++
++module.exports = {
++  sanitizeForAudit,
++  clientIp,
++  actorSnapshot,
++  inferContext,
++  recordAuditEvent,
++};
+diff --git a/backend/src/middleware/audit.middleware.js b/backend/src/middleware/audit.middleware.js
+new file mode 100644
+--- /dev/null
++++ b/backend/src/middleware/audit.middleware.js
+@@ -0,0 +1,64 @@
++'use strict';
++
++const crypto = require('crypto');
++const {
++  sanitizeForAudit,
++  clientIp,
++  actorSnapshot,
++  inferContext,
++  recordAuditEvent,
++} = require('../services/audit.service');
++
++const MUTATING_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
++
++function centralAuditMiddleware(req, res, next) {
++  if (!String(req.originalUrl || '').startsWith('/api/v1/')) return next();
++  if (!MUTATING_METHODS.has(String(req.method || '').toUpperCase())) return next();
++  if (String(req.originalUrl || '').startsWith('/api/v1/audit')) return next();
++
++  const requestId = String(req.headers['x-request-id'] || '').trim() || crypto.randomUUID();
++  const startedAt = Date.now();
++  req.auditRequestId = requestId;
++
++  if (!res.headersSent) res.setHeader('X-Request-Id', requestId);
++
++  res.once('finish', () => {
++    if (!req.user) return;
++
++    const actor = actorSnapshot(req);
++    const context = inferContext(req);
++    const statusCode = Number(res.statusCode || 0);
++    const outcome = statusCode >= 200 && statusCode < 400 ? 'SUCCESS' : 'FAILURE';
++
++    const payload = {
++      body: sanitizeForAudit(req.body),
++      query: sanitizeForAudit(req.query),
++    };
++
++    void recordAuditEvent({
++      ...actor,
++      action: context.action,
++      module: context.moduleName,
++      entity: context.entity,
++      entityId: context.entityId,
++      summary: `${context.action} ${context.entity} via ${context.method} ${context.route}`,
++      changes: payload,
++      metadata: {
++        durationMs: Date.now() - startedAt,
++        accessScope: req.accessScope || null,
++      },
++      requestId,
++      method: context.method,
++      route: context.route,
++      outcome,
++      statusCode,
++      reversible: false,
++      ipAddress: clientIp(req),
++      userAgent: req.get('user-agent') || null,
++    });
++  });
++
++  return next();
++}
++
++module.exports = centralAuditMiddleware;
+diff --git a/backend/src/controllers/audit.controller.js b/backend/src/controllers/audit.controller.js
+new file mode 100644
+--- /dev/null
++++ b/backend/src/controllers/audit.controller.js
+@@ -0,0 +1,156 @@
++'use strict';
++
++const prisma = require('../config/database');
++
++const MAX_PAGE_SIZE = 100;
++
++function clean(value) {
++  const text = String(value || '').trim();
++  return text || null;
++}
++
++function startOfToday() {
++  const now = new Date();
++  return new Date(now.getFullYear(), now.getMonth(), now.getDate());
++}
++
++function buildWhere(query) {
++  const where = {};
++  const search = clean(query.search);
++  const moduleName = clean(query.module);
++  const action = clean(query.action);
++  const outcome = clean(query.outcome);
++  const actor = clean(query.actor);
++  const from = clean(query.from);
++  const to = clean(query.to);
++
++  if (moduleName) where.module = moduleName;
++  if (action) where.action = action;
++  if (outcome) where.outcome = outcome;
++
++  if (actor) {
++    where.OR = [
++      { actorName: { contains: actor, mode: 'insensitive' } },
++      { actorEmail: { contains: actor, mode: 'insensitive' } },
++    ];
++  }
++
++  if (search) {
++    const searchOr = [
++      { actorName: { contains: search, mode: 'insensitive' } },
++      { actorEmail: { contains: search, mode: 'insensitive' } },
++      { action: { contains: search, mode: 'insensitive' } },
++      { module: { contains: search, mode: 'insensitive' } },
++      { entity: { contains: search, mode: 'insensitive' } },
++      { entityId: { contains: search, mode: 'insensitive' } },
++      { summary: { contains: search, mode: 'insensitive' } },
++      { route: { contains: search, mode: 'insensitive' } },
++      { requestId: { contains: search, mode: 'insensitive' } },
++    ];
++    if (where.OR) where.AND = [{ OR: where.OR }, { OR: searchOr }];
++    else where.OR = searchOr;
++  }
++
++  if (from || to) {
++    where.createdAt = {};
++    if (from) {
++      const date = new Date(`${from}T00:00:00`);
++      if (!Number.isNaN(date.getTime())) where.createdAt.gte = date;
++    }
++    if (to) {
++      const date = new Date(`${to}T23:59:59.999`);
++      if (!Number.isNaN(date.getTime())) where.createdAt.lte = date;
++    }
++    if (!Object.keys(where.createdAt).length) delete where.createdAt;
++  }
++
++  return where;
++}
++
++async function listEvents(req, res) {
++  try {
++    const page = Math.max(1, Number.parseInt(req.query.page, 10) || 1);
++    const pageSize = Math.min(MAX_PAGE_SIZE, Math.max(10, Number.parseInt(req.query.pageSize, 10) || 25));
++    const where = buildWhere(req.query);
++
++    const [total, events] = await Promise.all([
++      prisma.auditLog.count({ where }),
++      prisma.auditLog.findMany({
++        where,
++        orderBy: { createdAt: 'desc' },
++        skip: (page - 1) * pageSize,
++        take: pageSize,
++      }),
++    ]);
++
++    return res.json({
++      success: true,
++      data: {
++        events,
++        pagination: {
++          page,
++          pageSize,
++          total,
++          pages: Math.max(1, Math.ceil(total / pageSize)),
++        },
++      },
++    });
++  } catch (error) {
++    console.error('Central audit list error:', error);
++    return res.status(500).json({ success: false, message: 'Failed to load audit events' });
++  }
++}
++
++async function getEvent(req, res) {
++  try {
++    const event = await prisma.auditLog.findUnique({ where: { id: req.params.id } });
++    if (!event) return res.status(404).json({ success: false, message: 'Audit event not found' });
++    return res.json({ success: true, data: event });
++  } catch (error) {
++    console.error('Central audit detail error:', error);
++    return res.status(500).json({ success: false, message: 'Failed to load audit event' });
++  }
++}
++
++async function getSummary(req, res) {
++  try {
++    const today = startOfToday();
++    const last24Hours = new Date(Date.now() - (24 * 60 * 60 * 1000));
++
++    const [todayEvents, failed24h, actors24h, modules24h, latest] = await Promise.all([
++      prisma.auditLog.count({ where: { createdAt: { gte: today } } }),
++      prisma.auditLog.count({ where: { createdAt: { gte: last24Hours }, outcome: 'FAILURE' } }),
++      prisma.auditLog.groupBy({
++        by: ['actorEmail'],
++        where: { createdAt: { gte: last24Hours }, actorEmail: { not: null } },
++        _count: { _all: true },
++      }),
++      prisma.auditLog.groupBy({
++        by: ['module'],
++        where: { createdAt: { gte: last24Hours } },
++        _count: { _all: true },
++      }),
++      prisma.auditLog.findFirst({ orderBy: { createdAt: 'desc' }, select: { createdAt: true } }),
++    ]);
++
++    return res.json({
++      success: true,
++      data: {
++        todayEvents,
++        failed24h,
++        activeActors24h: actors24h.length,
++        activeModules24h: modules24h.length,
++        latestEventAt: latest?.createdAt || null,
++      },
++    });
++  } catch (error) {
++    console.error('Central audit summary error:', error);
++    return res.status(500).json({ success: false, message: 'Failed to load audit summary' });
++  }
++}
++
++module.exports = {
++  listEvents,
++  getEvent,
++  getSummary,
++};
+diff --git a/backend/src/routes/audit.routes.js b/backend/src/routes/audit.routes.js
+new file mode 100644
+--- /dev/null
++++ b/backend/src/routes/audit.routes.js
+@@ -0,0 +1,26 @@
++'use strict';
++
++const express = require('express');
++const router = express.Router();
++const authMiddleware = require('../middleware/auth.middleware');
++const auditController = require('../controllers/audit.controller');
++const { isReservedSuperAdmin } = require('../utils/superAdmin');
++
++function primarySuperAdminOnly(req, res, next) {
++  if (req.user?.role !== 'SUPER_ADMIN' || !isReservedSuperAdmin(req.user)) {
++    return res.status(403).json({
++      success: false,
++      message: 'Central Audit Center is limited to the primary SuperAdmin.',
++    });
++  }
++  return next();
++}
++
++router.use(authMiddleware);
++router.use(primarySuperAdminOnly);
++
++router.get('/summary', auditController.getSummary);
++router.get('/events', auditController.listEvents);
++router.get('/events/:id', auditController.getEvent);
++
++module.exports = router;
+diff --git a/backend/src/app.js b/backend/src/app.js
+--- a/backend/src/app.js
++++ b/backend/src/app.js
+@@ -1,4 +1,11 @@
+ // Static files
+ app.use('/uploads', express.static(path.join(__dirname, '..', 'uploads')));
++
++// Phase 1 central audit observes authenticated mutating API requests without
++// changing their business behavior. It is intentionally fail-open.
++app.use('/api', require('./middleware/audit.middleware'));
++app.use('/api/v1/audit', require('./routes/audit.routes'));
++
+ // API Routes
+ app.use('/api/v1/auth', authRoutes);
+diff --git a/frontend/src/pages/AuditCenter.jsx b/frontend/src/pages/AuditCenter.jsx
+new file mode 100644
+--- /dev/null
++++ b/frontend/src/pages/AuditCenter.jsx
+@@ -0,0 +1,395 @@
++import React, { useCallback, useEffect, useMemo, useState } from 'react';
++import api from '../services/api';
++import '../styles/thrs-audit-center.css';
++
++const EMPTY_FILTERS = {
++  search: '',
++  module: '',
++  action: '',
++  outcome: '',
++  from: '',
++  to: '',
++};
++
++const ACTION_LABELS = {
++  CREATE: 'Created',
++  UPDATE: 'Updated',
++  DELETE: 'Deleted',
++  APPROVE: 'Approved',
++  REJECT: 'Rejected',
++  PAY: 'Paid',
++  RELEASE: 'Released',
++  RECALCULATE: 'Recalculated',
++  SYNC: 'Synced',
++  RUN: 'Run',
++  GENERATE: 'Generated',
++  SEND: 'Sent',
++  PUBLISH: 'Published',
++  CANCEL: 'Cancelled',
++};
++
++function prettyToken(value) {
++  return String(value || '—')
++    .replace(/_/g, ' ')
++    .toLowerCase()
++    .replace(/\b\w/g, (char) => char.toUpperCase());
++}
++
++function formatDate(value) {
++  if (!value) return '—';
++  const date = new Date(value);
++  if (Number.isNaN(date.getTime())) return '—';
++  return date.toLocaleString(undefined, {
++    year: 'numeric',
++    month: 'short',
++    day: '2-digit',
++    hour: '2-digit',
++    minute: '2-digit',
++    second: '2-digit',
++  });
++}
++
++function JsonBlock({ title, value }) {
++  if (value === null || value === undefined) return null;
++  return (
++    <section className="thrs-audit-json-card">
++      <div className="thrs-audit-json-title">{title}</div>
++      <pre>{JSON.stringify(value, null, 2)}</pre>
++    </section>
++  );
++}
++
++const AuditCenter = () => {
++  const [events, setEvents] = useState([]);
++  const [summary, setSummary] = useState({
++    todayEvents: 0,
++    failed24h: 0,
++    activeActors24h: 0,
++    activeModules24h: 0,
++    latestEventAt: null,
++  });
++  const [filters, setFilters] = useState(EMPTY_FILTERS);
++  const [appliedFilters, setAppliedFilters] = useState(EMPTY_FILTERS);
++  const [pagination, setPagination] = useState({ page: 1, pageSize: 25, total: 0, pages: 1 });
++  const [selected, setSelected] = useState(null);
++  const [loading, setLoading] = useState(true);
++  const [error, setError] = useState('');
++
++  const modules = useMemo(
++    () => Array.from(new Set(events.map((event) => event.module).filter(Boolean))).sort(),
++    [events]
++  );
++
++  const loadSummary = useCallback(async () => {
++    try {
++      const response = await api.get('/audit/summary');
++      setSummary(response?.data || {});
++    } catch (requestError) {
++      console.error('Audit summary failed:', requestError);
++    }
++  }, []);
++
++  const loadEvents = useCallback(async (page = 1, pageSize = pagination.pageSize) => {
++    setLoading(true);
++    setError('');
++    try {
++      const params = {
++        page,
++        pageSize,
++        ...Object.fromEntries(
++          Object.entries(appliedFilters).filter(([, value]) => String(value || '').trim())
++        ),
++      };
++      const response = await api.get('/audit/events', { params });
++      setEvents(response?.data?.events || []);
++      setPagination(response?.data?.pagination || { page, pageSize, total: 0, pages: 1 });
++    } catch (requestError) {
++      setError(requestError?.message || 'Failed to load central audit events.');
++    } finally {
++      setLoading(false);
++    }
++  }, [appliedFilters, pagination.pageSize]);
++
++  useEffect(() => {
++    loadSummary();
++  }, [loadSummary]);
++
++  useEffect(() => {
++    loadEvents(1, pagination.pageSize);
++    // pageSize is intentionally passed to the loader; applied filters own reloads.
++    // eslint-disable-next-line react-hooks/exhaustive-deps
++  }, [appliedFilters]);
++
++  const applyFilters = (event) => {
++    event.preventDefault();
++    setAppliedFilters({ ...filters });
++  };
++
++  const clearFilters = () => {
++    setFilters(EMPTY_FILTERS);
++    setAppliedFilters(EMPTY_FILTERS);
++  };
++
++  const changePageSize = (event) => {
++    const next = Number(event.target.value);
++    setPagination((current) => ({ ...current, pageSize: next }));
++    loadEvents(1, next);
++  };
++
++  const openDetails = async (event) => {
++    setSelected(event);
++    try {
++      const response = await api.get(`/audit/events/${event.id}`);
++      if (response?.data) setSelected(response.data);
++    } catch (requestError) {
++      console.error('Audit detail failed:', requestError);
++    }
++  };
++
++  return (
++    <div className="thrs-audit-center">
++      <header className="thrs-audit-hero">
++        <div>
++          <span className="thrs-audit-eyebrow">SYSTEM GOVERNANCE · PHASE 1</span>
++          <h1>Central Audit Center</h1>
++          <p>Immutable activity ledger for material changes across THRS.</p>
++        </div>
++        <div className="thrs-audit-phase-badge">
++          <span className="thrs-audit-live-dot" />
++          Audit backbone active
++        </div>
++      </header>
++
++      <section className="thrs-audit-kpis" aria-label="Audit summary">
++        <article>
++          <span>Events today</span>
++          <strong>{summary.todayEvents || 0}</strong>
++          <small>Recorded state-changing activity</small>
++        </article>
++        <article>
++          <span>Failed actions · 24h</span>
++          <strong>{summary.failed24h || 0}</strong>
++          <small>Authenticated attempts returning errors</small>
++        </article>
++        <article>
++          <span>Active actors · 24h</span>
++          <strong>{summary.activeActors24h || 0}</strong>
++          <small>Unique users in the ledger</small>
++        </article>
++        <article>
++          <span>Active modules · 24h</span>
++          <strong>{summary.activeModules24h || 0}</strong>
++          <small>System areas with recorded changes</small>
++        </article>
++      </section>
++
++      <section className="thrs-audit-governance-note">
++        <div>
++          <strong>Phase 1 records. It does not reverse.</strong>
++          <span>Soft Delete and Undo will be layered onto this ledger in later phases.</span>
++        </div>
++        <span className="thrs-audit-readonly-pill">READ-ONLY LEDGER</span>
++      </section>
++
++      <form className="thrs-audit-filters" onSubmit={applyFilters}>
++        <label className="thrs-audit-search">
++          <span>Search activity</span>
++          <input
++            value={filters.search}
++            onChange={(event) => setFilters((current) => ({ ...current, search: event.target.value }))}
++            placeholder="Actor, action, entity, request ID..."
++          />
++        </label>
++        <label>
++          <span>Module</span>
++          <input
++            list="thrs-audit-modules"
++            value={filters.module}
++            onChange={(event) => setFilters((current) => ({ ...current, module: event.target.value.toUpperCase() }))}
++            placeholder="All modules"
++          />
++          <datalist id="thrs-audit-modules">
++            {modules.map((moduleName) => <option key={moduleName} value={moduleName} />)}
++          </datalist>
++        </label>
++        <label>
++          <span>Action</span>
++          <select
++            value={filters.action}
++            onChange={(event) => setFilters((current) => ({ ...current, action: event.target.value }))}
++          >
++            <option value="">All actions</option>
++            <option value="CREATE">Create</option>
++            <option value="UPDATE">Update</option>
++            <option value="DELETE">Delete</option>
++            <option value="APPROVE">Approve</option>
++            <option value="REJECT">Reject</option>
++          </select>
++        </label>
++        <label>
++          <span>Outcome</span>
++          <select
++            value={filters.outcome}
++            onChange={(event) => setFilters((current) => ({ ...current, outcome: event.target.value }))}
++          >
++            <option value="">All outcomes</option>
++            <option value="SUCCESS">Success</option>
++            <option value="FAILURE">Failure</option>
++          </select>
++        </label>
++        <label>
++          <span>From</span>
++          <input type="date" value={filters.from} onChange={(event) => setFilters((current) => ({ ...current, from: event.target.value }))} />
++        </label>
++        <label>
++          <span>To</span>
++          <input type="date" value={filters.to} onChange={(event) => setFilters((current) => ({ ...current, to: event.target.value }))} />
++        </label>
++        <div className="thrs-audit-filter-actions">
++          <button type="button" onClick={clearFilters}>Clear</button>
++          <button type="submit" className="is-primary">Apply filters</button>
++        </div>
++      </form>
++
++      <section className="thrs-audit-ledger-card">
++        <div className="thrs-audit-ledger-head">
++          <div>
++            <span className="thrs-audit-eyebrow">CENTRAL LEDGER</span>
++            <h2>System Activity</h2>
++            <p>{pagination.total || 0} immutable audit events</p>
++          </div>
++          <label className="thrs-audit-page-size">
++            <span>Rows</span>
++            <select value={pagination.pageSize} onChange={changePageSize}>
++              <option value={25}>25</option>
++              <option value={50}>50</option>
++              <option value={100}>100</option>
++            </select>
++          </label>
++        </div>
++
++        {error && <div className="thrs-audit-error">{error}</div>}
++
++        <div className="thrs-audit-table-wrap">
++          <table className="thrs-audit-table">
++            <thead>
++              <tr>
++                <th>Time</th>
++                <th>Actor</th>
++                <th>Action</th>
++                <th>Module / Target</th>
++                <th>Outcome</th>
++                <th>Source</th>
++                <th aria-label="Details" />
++              </tr>
++            </thead>
++            <tbody>
++              {loading && (
++                <tr><td colSpan="7" className="thrs-audit-empty">Loading audit ledger…</td></tr>
++              )}
++              {!loading && events.length === 0 && (
++                <tr><td colSpan="7" className="thrs-audit-empty">No audit events match the current filters.</td></tr>
++              )}
++              {!loading && events.map((event) => (
++                <tr key={event.id}>
++                  <td>
++                    <strong className="thrs-audit-time">{formatDate(event.createdAt)}</strong>
++                    <small>{event.requestId ? event.requestId.slice(0, 8) : 'No request ID'}</small>
++                  </td>
++                  <td>
++                    <strong>{event.actorName || event.actorEmail || 'System actor'}</strong>
++                    <small>{event.actorRole ? prettyToken(event.actorRole) : '—'}</small>
++                  </td>
++                  <td>
++                    <span className={`thrs-audit-action is-${String(event.action || 'action').toLowerCase()}`}>
++                      {ACTION_LABELS[event.action] || prettyToken(event.action)}
++                    </span>
++                    <small>{event.method || '—'}</small>
++                  </td>
++                  <td>
++                    <strong>{prettyToken(event.module)}</strong>
++                    <small>{event.entity || '—'}{event.entityId ? ` · ${String(event.entityId).slice(0, 12)}` : ''}</small>
++                  </td>
++                  <td>
++                    <span className={`thrs-audit-outcome is-${String(event.outcome || '').toLowerCase()}`}>
++                      {prettyToken(event.outcome)}
++                    </span>
++                    <small>{event.statusCode || '—'}</small>
++                  </td>
++                  <td>
++                    <strong>{prettyToken(event.source)}</strong>
++                    <small>{event.reversible ? 'Reversible' : 'Recovery pending'}</small>
++                  </td>
++                  <td>
++                    <button className="thrs-audit-detail-button" type="button" onClick={() => openDetails(event)}>
++                      Inspect
++                    </button>
++                  </td>
++                </tr>
++              ))}
++            </tbody>
++          </table>
++        </div>
++
++        <footer className="thrs-audit-pagination">
++          <span>Page {pagination.page} of {pagination.pages}</span>
++          <div>
++            <button
++              type="button"
++              disabled={pagination.page <= 1 || loading}
++              onClick={() => loadEvents(pagination.page - 1)}
++            >
++              Previous
++            </button>
++            <button
++              type="button"
++              disabled={pagination.page >= pagination.pages || loading}
++              onClick={() => loadEvents(pagination.page + 1)}
++            >
++              Next
++            </button>
++          </div>
++        </footer>
++      </section>
++
++      {selected && (
++        <div className="thrs-audit-drawer-backdrop" role="presentation" onMouseDown={() => setSelected(null)}>
++          <aside
++            className="thrs-audit-drawer"
++            role="dialog"
++            aria-modal="true"
++            aria-label="Audit event details"
++            onMouseDown={(event) => event.stopPropagation()}
++          >
++            <div className="thrs-audit-drawer-head">
++              <div>
++                <span className="thrs-audit-eyebrow">AUDIT EVENT</span>
++                <h2>{prettyToken(selected.action)} · {prettyToken(selected.module)}</h2>
++                <p>{selected.summary || selected.route || 'Recorded system activity'}</p>
++              </div>
++              <button type="button" onClick={() => setSelected(null)} aria-label="Close audit details">×</button>
++            </div>
++
++            <div className="thrs-audit-detail-grid">
++              <div><span>Actor</span><strong>{selected.actorName || selected.actorEmail || 'System actor'}</strong></div>
++              <div><span>Role</span><strong>{prettyToken(selected.actorRole)}</strong></div>
++              <div><span>Time</span><strong>{formatDate(selected.createdAt)}</strong></div>
++              <div><span>Outcome</span><strong>{prettyToken(selected.outcome)} · {selected.statusCode || '—'}</strong></div>
++              <div><span>Request ID</span><strong>{selected.requestId || '—'}</strong></div>
++              <div><span>Route</span><strong>{selected.method || '—'} {selected.route || '—'}</strong></div>
++              <div><span>IP address</span><strong>{selected.ipAddress || '—'}</strong></div>
++              <div><span>Recovery</span><strong>{selected.reversible ? 'Reversible' : 'Planned for Phase 3'}</strong></div>
++            </div>
++
++            <JsonBlock title="Recorded request" value={selected.changes} />
++            <JsonBlock title="Before state" value={selected.beforeState} />
++            <JsonBlock title="After state" value={selected.afterState} />
++            <JsonBlock title="Metadata" value={selected.metadata} />
++          </aside>
++        </div>
++      )}
++    </div>
++  );
++};
++
++export default AuditCenter;
+diff --git a/frontend/src/styles/thrs-audit-center.css b/frontend/src/styles/thrs-audit-center.css
+new file mode 100644
+--- /dev/null
++++ b/frontend/src/styles/thrs-audit-center.css
+@@ -0,0 +1,1 @@
++.thrs-audit-center{display:grid;gap:18px;padding:0 0 28px;color:#102a45}.thrs-audit-hero{position:relative;display:flex;align-items:center;justify-content:space-between;gap:20px;padding:22px 24px;border:1px solid #e1e8ef;border-radius:18px;background:linear-gradient(118deg,#fff 0%,#fbfcfe 70%,#f6f0df 100%);box-shadow:0 12px 34px rgba(18,47,75,.08);overflow:hidden}.thrs-audit-hero:after{content:"";position:absolute;right:-25px;top:-45px;width:150px;height:150px;border-radius:50%;background:rgba(199,158,57,.08)}.thrs-audit-eyebrow{display:block;margin-bottom:5px;color:#b58a20;font-size:10px;font-weight:800;letter-spacing:.14em}.thrs-audit-hero h1,.thrs-audit-ledger-head h2,.thrs-audit-drawer h2{margin:0;color:#0a2e52}.thrs-audit-hero h1{font-size:28px;line-height:1.1}.thrs-audit-hero p,.thrs-audit-ledger-head p,.thrs-audit-drawer p{margin:5px 0 0;color:#708296;font-size:12px}.thrs-audit-phase-badge{position:relative;z-index:1;display:inline-flex;align-items:center;gap:8px;padding:9px 12px;border:1px solid #d9e4ee;border-radius:999px;background:rgba(255,255,255,.88);color:#314c66;font-size:11px;font-weight:800;white-space:nowrap}.thrs-audit-live-dot{width:8px;height:8px;border-radius:50%;background:#18a566;box-shadow:0 0 0 4px rgba(24,165,102,.12)}.thrs-audit-kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}.thrs-audit-kpis article{position:relative;padding:17px 18px;border:1px solid #e1e8ef;border-radius:15px;background:#fff;box-shadow:0 8px 24px rgba(18,47,75,.055)}.thrs-audit-kpis article:before{content:"";position:absolute;left:0;top:14px;bottom:14px;width:3px;border-radius:3px;background:#c79e39}.thrs-audit-kpis span{display:block;color:#708296;font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.06em}.thrs-audit-kpis strong{display:block;margin-top:5px;color:#0a2e52;font-size:27px}.thrs-audit-kpis small{display:block;margin-top:4px;color:#91a0ae;font-size:10px}.thrs-audit-governance-note{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:12px 15px;border:1px solid #dce6ef;border-radius:13px;background:#f8fbfd}.thrs-audit-governance-note div{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}.thrs-audit-governance-note strong{font-size:12px;color:#213d57}.thrs-audit-governance-note span{font-size:11px;color:#72869a}.thrs-audit-readonly-pill{padding:5px 8px;border-radius:999px;background:#edf3f8;color:#47637c!important;font-size:9px!important;font-weight:900;letter-spacing:.08em;white-space:nowrap}.thrs-audit-filters{display:grid;grid-template-columns:minmax(220px,2fr) repeat(3,minmax(125px,1fr)) minmax(130px,.8fr) minmax(130px,.8fr) auto;gap:9px;align-items:end;padding:14px;border:1px solid #e1e8ef;border-radius:15px;background:#fff;box-shadow:0 8px 24px rgba(18,47,75,.05)}.thrs-audit-filters label,.thrs-audit-page-size{display:grid;gap:5px;min-width:0}.thrs-audit-filters label>span,.thrs-audit-page-size>span{color:#71869a;font-size:9px;font-weight:900;letter-spacing:.07em;text-transform:uppercase}.thrs-audit-filters input,.thrs-audit-filters select,.thrs-audit-page-size select{width:100%;height:38px;padding:0 11px;border:1px solid #dbe4ec;border-radius:10px;background:#fff;color:#233e57;font:inherit;font-size:11px;outline:none}.thrs-audit-filters input:focus,.thrs-audit-filters select:focus,.thrs-audit-page-size select:focus{border-color:#7397b9;box-shadow:0 0 0 3px rgba(69,113,153,.09)}.thrs-audit-filter-actions{display:flex;gap:7px}.thrs-audit-filter-actions button,.thrs-audit-pagination button,.thrs-audit-detail-button{height:38px;padding:0 12px;border:1px solid #dbe4ec;border-radius:10px;background:#fff;color:#38536d;font-size:10px;font-weight:800;cursor:pointer}.thrs-audit-filter-actions .is-primary{border-color:#0b345a;background:#0b345a;color:#fff}.thrs-audit-ledger-card{overflow:hidden;border:1px solid #e1e8ef;border-radius:17px;background:#fff;box-shadow:0 12px 32px rgba(18,47,75,.07)}.thrs-audit-ledger-head{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:17px 18px;border-bottom:1px solid #e7edf3;background:linear-gradient(90deg,#fff,#fbfcfd)}.thrs-audit-ledger-head h2{font-size:16px}.thrs-audit-page-size{width:76px}.thrs-audit-table-wrap{overflow-x:auto}.thrs-audit-table{width:100%;min-width:980px;border-collapse:collapse}.thrs-audit-table th{padding:10px 12px;border-bottom:1px solid #dfe7ee;background:#f7f9fb;color:#486077;font-size:9px;font-weight:900;letter-spacing:.06em;text-align:left;text-transform:uppercase}.thrs-audit-table td{padding:11px 12px;border-bottom:1px solid #edf1f4;vertical-align:middle;color:#263f57;font-size:11px}.thrs-audit-table tbody tr:hover{background:#f9fbfd}.thrs-audit-table td strong{display:block;font-size:11px}.thrs-audit-table td small{display:block;margin-top:3px;color:#8798a8;font-size:9px}.thrs-audit-time{white-space:nowrap}.thrs-audit-action,.thrs-audit-outcome{display:inline-flex;align-items:center;min-height:22px;padding:0 8px;border-radius:999px;background:#eef3f7;color:#37546e;font-size:9px;font-weight:900;letter-spacing:.02em}.thrs-audit-action.is-delete{background:#fff1ef;color:#b74437}.thrs-audit-action.is-create,.thrs-audit-outcome.is-success{background:#e9f8f0;color:#188654}.thrs-audit-action.is-update{background:#edf4fc;color:#316c9f}.thrs-audit-action.is-approve{background:#e9f8f0;color:#188654}.thrs-audit-action.is-reject,.thrs-audit-outcome.is-failure{background:#fff1ef;color:#b74437}.thrs-audit-detail-button{height:30px;padding:0 10px}.thrs-audit-empty{padding:34px!important;text-align:center;color:#8294a5!important}.thrs-audit-error{margin:12px 18px 0;padding:10px 12px;border:1px solid #f1c7c2;border-radius:10px;background:#fff5f3;color:#a23d33;font-size:11px}.thrs-audit-pagination{display:flex;align-items:center;justify-content:space-between;padding:11px 14px;background:#fbfcfd;color:#71859a;font-size:10px}.thrs-audit-pagination div{display:flex;gap:7px}.thrs-audit-pagination button{height:32px}.thrs-audit-pagination button:disabled{opacity:.45;cursor:not-allowed}.thrs-audit-drawer-backdrop{position:fixed;inset:0;z-index:1200;display:flex;justify-content:flex-end;background:rgba(5,23,39,.35);backdrop-filter:blur(2px)}.thrs-audit-drawer{width:min(620px,92vw);height:100%;overflow:auto;padding:22px;background:#f7f9fb;box-shadow:-18px 0 50px rgba(5,30,52,.18)}.thrs-audit-drawer-head{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;padding:3px 2px 17px;border-bottom:1px solid #dde6ee}.thrs-audit-drawer-head>button{width:34px;height:34px;border:1px solid #d7e1e9;border-radius:10px;background:#fff;color:#35516a;font-size:21px;cursor:pointer}.thrs-audit-detail-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px;margin:15px 0}.thrs-audit-detail-grid>div{padding:11px;border:1px solid #e0e8ef;border-radius:11px;background:#fff;min-width:0}.thrs-audit-detail-grid span{display:block;color:#7c8e9e;font-size:9px;font-weight:900;text-transform:uppercase}.thrs-audit-detail-grid strong{display:block;margin-top:4px;color:#26425b;font-size:11px;overflow-wrap:anywhere}.thrs-audit-json-card{margin-top:10px;border:1px solid #dfe7ee;border-radius:12px;background:#fff;overflow:hidden}.thrs-audit-json-title{padding:9px 11px;border-bottom:1px solid #e7edf2;color:#456078;font-size:10px;font-weight:900;text-transform:uppercase}.thrs-audit-json-card pre{max-height:280px;overflow:auto;margin:0;padding:12px;background:#0d2235;color:#d7e5ef;font:10px/1.55 ui-monospace,SFMono-Regular,Menlo,monospace;white-space:pre-wrap;overflow-wrap:anywhere}@media(max-width:1180px){.thrs-audit-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}.thrs-audit-filters{grid-template-columns:repeat(3,minmax(0,1fr))}.thrs-audit-search{grid-column:span 2}.thrs-audit-filter-actions{justify-content:flex-end}}@media(max-width:760px){.thrs-audit-hero{align-items:flex-start;flex-direction:column;padding:18px}.thrs-audit-hero h1{font-size:23px}.thrs-audit-phase-badge{align-self:flex-start}.thrs-audit-kpis{grid-template-columns:1fr 1fr}.thrs-audit-kpis article{padding:14px}.thrs-audit-governance-note{align-items:flex-start;flex-direction:column}.thrs-audit-filters{grid-template-columns:1fr 1fr}.thrs-audit-search{grid-column:1/-1}.thrs-audit-filter-actions{grid-column:1/-1}.thrs-audit-detail-grid{grid-template-columns:1fr}.thrs-audit-drawer{width:100vw}.thrs-audit-kpis strong{font-size:22px}}@media(max-width:480px){.thrs-audit-kpis,.thrs-audit-filters{grid-template-columns:1fr}.thrs-audit-search,.thrs-audit-filter-actions{grid-column:auto}.thrs-audit-filter-actions button{flex:1}}
+diff --git a/frontend/src/App.jsx b/frontend/src/App.jsx
+--- a/frontend/src/App.jsx
++++ b/frontend/src/App.jsx
+@@ -61,2 +61,3 @@
+ const DatabaseBackupOAuthCallback = lazy(() => import('./pages/DatabaseBackupOAuthCallback'));
++const AuditCenter = lazy(() => import('./pages/AuditCenter'));
+ const CompanyOverviewReport = lazy(() => import('./pages/reports/CompanyOverviewReport'));
+@@ -171,2 +172,3 @@
+       <Route path="/settings" element={<ProtectedRoute roles={['SUPER_ADMIN', 'CEO', 'HR_ADMIN']}><Settings /></ProtectedRoute>} />
++      <Route path="/audit-center" element={<ReservedSuperAdminRoute><AuditCenter /></ReservedSuperAdminRoute>} />
+       <Route path="/executive-ai" element={<ReservedSuperAdminRoute><ExecutiveAIWorkspace /></ReservedSuperAdminRoute>} />
+diff --git a/frontend/src/components/Layout/Sidebar.jsx b/frontend/src/components/Layout/Sidebar.jsx
+--- a/frontend/src/components/Layout/Sidebar.jsx
++++ b/frontend/src/components/Layout/Sidebar.jsx
+@@ -1,3 +1,4 @@
+       { path: '/reports', label: 'Reports', icon: '📑', roles: REPORT_ROLES },
+       { path: '/documents', label: 'Documents', icon: '📄', roles: ALL_ROLES },
++      { path: '/audit-center', label: 'Audit Center', icon: '🛡️', roles: ['SUPER_ADMIN'] },
+       { path: '/settings', label: 'Settings', icon: '⚙️', roles: ['SUPER_ADMIN', 'HR_ADMIN'] },
