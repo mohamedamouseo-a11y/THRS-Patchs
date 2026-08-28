@@ -1,0 +1,156 @@
+TASK: Apply THRS Overtime Management UX/UI V1.1 Final Polish on the EXISTING live V1 deployment.
+
+LIVE CHECKOUT:
+/var/www/tamiyouz_hr
+
+PATCH REPOSITORY:
+https://github.com/mohamedamouseo-a11y/THRS-Patchs.git
+
+PATCH FILE:
+THRS_OVERTIME_UX_V1_1_FINAL_POLISH_2026-08-28.patch
+
+EXACT PATCH COMMIT:
+08e60215bfc7cf90ec95e7d9d70cc82939db72b7
+
+EXPECTED PATCH BLOB SHA:
+701299f02688c2b705f66ece5133e9e8c82706b3
+
+PURPOSE:
+Final visual polish only on top of the already-deployed Overtime V1.
+This V1.1 must NOT change overtime data logic, APIs, permissions, calculations, Request Overtime behavior, Approve/Reject logic, filters, pagination behavior, or backend behavior.
+
+VISUAL TARGETS:
+- Reduce Hero and KPI vertical height/spacing.
+- Convert the oversized full-width tabs into compact segmented tabs on desktop.
+- Make the filter bar tighter and cleaner.
+- Give more table width to Reason and reduce Employee/Date/Hours/Actions width.
+- Increase table body readability slightly.
+- Keep Reason limited to 2 lines.
+- Make table header sticky inside the requests table scroll area.
+- Make status badges slightly larger/clearer.
+- Keep action buttons compact.
+- Reduce excessive vertical spacing across the page.
+- Make Rate Configuration more compact.
+- Preserve responsive behavior on mobile/tablet.
+
+HARD CONSTRAINTS:
+- Frontend visual polish only.
+- DO NOT modify backend.
+- DO NOT modify DB, Prisma, migrations, auth, routes, Nginx config, DNS, SSL, ports, PM2 config, or unrelated files.
+- DO NOT modify frontend/src/styles/thrs-overtime-v1-premium.css.
+- DO NOT rewrite OvertimeManagement.jsx manually.
+- DO NOT commit.
+- DO NOT push.
+- DO NOT stash/reset/checkout/clean unrelated working-tree changes.
+
+PRE-FLIGHT:
+1. cd /var/www/tamiyouz_hr
+2. Record: git status --short
+3. Confirm frontend/src/pages/OvertimeManagement.jsx currently contains:
+   import '../styles/thrs-overtime-v1-premium.css';
+4. Confirm frontend/src/styles/thrs-overtime-v1-premium.css exists.
+5. Confirm OvertimeManagement.jsx does NOT already contain:
+   thrs-overtime-v1-1-final-polish.css
+6. Confirm frontend/src/styles/thrs-overtime-v1-1-final-polish.css does NOT already exist.
+7. Fetch/read the patch from THRS-Patchs at the exact commit above.
+8. Verify the fetched patch blob SHA is exactly:
+   701299f02688c2b705f66ece5133e9e8c82706b3
+
+MANDATORY PATCH CHECKS:
+Run:
+  git apply --numstat THRS_OVERTIME_UX_V1_1_FINAL_POLISH_2026-08-28.patch
+  git apply --check THRS_OVERTIME_UX_V1_1_FINAL_POLISH_2026-08-28.patch
+
+Expected numstat for THIS incremental patch:
+- 1 insertion, 0 deletions in frontend/src/pages/OvertimeManagement.jsx
+- 327 insertions, 0 deletions in frontend/src/styles/thrs-overtime-v1-1-final-polish.css
+
+Both commands MUST pass.
+If either fails:
+STOP immediately.
+DO NOT manually apply.
+DO NOT use --3way.
+DO NOT use --reject.
+DO NOT edit around the failure.
+
+APPLY:
+Apply the patch exactly once.
+
+V1.1 PATCH MUST TOUCH ONLY:
+- frontend/src/pages/OvertimeManagement.jsx  (one new CSS import only)
+- frontend/src/styles/thrs-overtime-v1-1-final-polish.css  (new visual override file)
+
+IMPORTANT:
+The pre-existing V1 working-tree changes must remain intact:
+- frontend/src/pages/OvertimeManagement.jsx
+- frontend/src/styles/thrs-overtime-v1-premium.css
+Do not replace, revert, or normalize them.
+
+POST-APPLY VALIDATION:
+1. git diff --check
+2. Verify OvertimeManagement.jsx imports BOTH, in this order:
+   thrs-overtime-v1-premium.css
+   thrs-overtime-v1-1-final-polish.css
+3. Verify the V1.1 CSS file exists and includes:
+   - compact hero/KPI rules
+   - compact segmented tab rules
+   - compact filter rules
+   - table-layout/column-width rules
+   - sticky table header
+   - 2-line reason clamp
+   - larger status badge rules
+   - compact action/pagination rules
+   - responsive breakpoints
+4. Confirm no JS logic lines were changed by V1.1 beyond the single CSS import.
+5. Confirm no backend files were changed by this task.
+
+BUILD / DEPLOY:
+cd /var/www/tamiyouz_hr/frontend
+CI=false npm run build
+
+Build MUST pass.
+The existing production method serves frontend/build directly.
+Do not change Nginx configuration.
+Do not restart PM2 for this frontend-only polish.
+
+SMOKE TEST:
+- https://hr.tamiyouzplaform.com/overtime -> HTTP 200
+- https://hr.tamiyouzplaform.com/ -> HTTP 200
+- confirm the newly built CSS contains thrs-overtime-v1-1-final-polish rules
+
+SAFE UX CHECKS WITHOUT MUTATING RECORDS:
+- Hero/KPIs are visibly tighter.
+- Requests/Monthly Summary tabs are compact segmented controls on desktop.
+- Filter row is tighter.
+- Reason column is wider than before.
+- Employee/Date/Hours/Actions columns are more compact.
+- Table text is slightly larger/readable.
+- Reason remains max 2 lines.
+- Table header remains visible while scrolling the table body.
+- Status badges are clearer/larger.
+- Rate Configuration is more compact.
+- Existing Request Overtime modal still opens.
+- Existing Requests/Summary tabs still switch.
+- Existing filters and pagination still work.
+- Existing Approve/Reject governing condition remains untouched.
+- DO NOT create, approve, reject, or edit real overtime records during validation.
+
+FINAL SAFETY:
+DO NOT COMMIT.
+DO NOT PUSH.
+Leave V1 + V1.1 changes local for visual approval.
+
+RETURN:
+- pre-flight results
+- patch blob verification
+- git apply --numstat result
+- git apply --check result
+- files touched by V1.1
+- git diff --check result
+- build result
+- smoke-test HTTP results
+- UX validation results
+- final git status relevant lines
+- confirmation no commit/push
+
+FINAL_MARKER=THRS_OVERTIME_UX_V1_1_FINAL_POLISH_DEPLOYED_OK
