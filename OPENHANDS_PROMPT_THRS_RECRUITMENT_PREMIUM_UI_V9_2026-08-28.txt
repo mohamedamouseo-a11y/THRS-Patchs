@@ -1,0 +1,121 @@
+TASK: Apply the THRS Recruitment Premium UI V9 patch to the EXISTING THRS deployment on this server, validate it, and leave the changes locally for human review. DO NOT push or commit to the THRS GitHub repository.
+
+PATCH SOURCE
+- Patch repo: https://github.com/mohamedamouseo-a11y/THRS-Patchs.git
+- Patch repo commit containing the patch: d1c159ed44fed67362606ffe5cdfee810d898594
+- Patch file: THRS_RECRUITMENT_PREMIUM_UI_V9_2026-08-28.patch
+
+SCOPE
+This is a UI/UX-only Recruitment page patch. It must NOT change backend logic, APIs, database schema/data, recruitment status behavior, filters, pagination logic, candidate update logic, jobs logic, routes, authentication, or any other module.
+Expected touched files after apply:
+1) frontend/src/pages/Recruitment.jsx — one CSS import only.
+2) frontend/src/styles/thrs-recruitment-v9-premium.css — new scoped UI stylesheet.
+
+EXECUTION RULES
+- Work on the existing THRS checkout/deployment already present on this server.
+- Do not clone a replacement THRS project over the live project.
+- Do not run git reset --hard, git clean, checkout another THRS branch, force anything, or discard unrelated local work.
+- Do not commit and DO NOT PUSH to GitHub.
+- If the target project cannot be identified unambiguously, stop and report the candidate paths.
+- If Recruitment.jsx already has unrelated local modifications, preserve them. The patch must pass `git apply --check`; do not force-apply a rejected hunk.
+
+STEPS
+
+1. Locate and verify the live THRS working tree.
+   Prefer the current workspace if it contains:
+   - frontend/package.json
+   - frontend/src/pages/Recruitment.jsx
+   - frontend/src/styles/thrs-recruitment.css
+   If not, search only common deployment roots such as /var/www, /srv, /opt, and /home. If more than one valid THRS checkout is found, stop and report them instead of guessing.
+
+2. Enter the THRS repo root and capture the pre-change state:
+   - pwd
+   - git rev-parse --show-toplevel
+   - git rev-parse HEAD
+   - git branch --show-current
+   - git status --short
+   - git diff -- frontend/src/pages/Recruitment.jsx frontend/src/styles/thrs-recruitment-v9-premium.css
+
+3. Create a timestamped backup BEFORE applying anything.
+   Example:
+   BACKUP_DIR="/tmp/thrs-recruitment-v9-backup-$(date +%Y%m%d-%H%M%S)"
+   mkdir -p "$BACKUP_DIR/frontend/src/pages" "$BACKUP_DIR/frontend/src/styles"
+   cp -a frontend/src/pages/Recruitment.jsx "$BACKUP_DIR/frontend/src/pages/Recruitment.jsx"
+   If frontend/src/styles/thrs-recruitment-v9-premium.css already exists, back it up too.
+   Save pre-change git metadata in "$BACKUP_DIR/prechange-git.txt".
+
+4. Get the exact patch without changing the THRS repo:
+   - Clone or refresh THRS-Patchs into /tmp/THRS-Patchs-V9.
+   - Checkout patch commit d1c159ed44fed67362606ffe5cdfee810d898594 in that temporary patch repo.
+   - Confirm the patch file exists.
+
+5. Preflight the patch from the THRS repo root:
+   git apply --check /tmp/THRS-Patchs-V9/THRS_RECRUITMENT_PREMIUM_UI_V9_2026-08-28.patch
+
+   If this fails:
+   - DO NOT use --reject, --3way, sed replacements, or manual forced edits.
+   - Report the exact failure and current `git diff` for Recruitment.jsx.
+   - Restore nothing unless you already changed something.
+   - Stop.
+
+6. Apply exactly once:
+   git apply /tmp/THRS-Patchs-V9/THRS_RECRUITMENT_PREMIUM_UI_V9_2026-08-28.patch
+
+7. Verify scope immediately:
+   - git status --short
+   - git diff --check
+   - git diff --stat
+   - git diff -- frontend/src/pages/Recruitment.jsx
+   - Confirm new file exists: frontend/src/styles/thrs-recruitment-v9-premium.css
+   - Confirm Recruitment.jsx contains exactly one import for `../styles/thrs-recruitment-v9-premium.css`.
+   - Confirm no backend/database/config files were changed by this task.
+
+8. Frontend validation:
+   cd frontend
+   - Use the existing dependency installation if node_modules is already valid.
+   - Only run `npm ci` if dependencies are missing and package-lock.json is present.
+   - Run: npm run build
+   - Run tests non-interactively: CI=true npm test -- --watchAll=false --passWithNoTests
+
+   If tests fail because of already-existing unrelated tests, separate that clearly from any new error caused by this patch. Build failure caused by the patch is a blocker.
+
+9. Runtime/deployment validation:
+   - Detect the CURRENT deployment method already used by this server (static React build behind Nginx, PM2, Docker, systemd, or existing deployment script).
+   - Do not alter Nginx, DNS, SSL, ports, environment variables, backend services, or deployment architecture.
+   - Publish/reload only using the existing established frontend deployment mechanism if a deploy step is actually required.
+   - If Nginx serves the generated build directly and no restart is required, do not restart services unnecessarily.
+
+10. Smoke-test the live Recruitment page using the existing THRS URL/configuration:
+   - Page loads without JS runtime errors.
+   - Recruitment header and Add Position remain functional.
+   - KPI cards render.
+   - All 10 recruitment pipeline stages render and remain clickable/filterable.
+   - Applicants/Jobs tabs work.
+   - Search and filters work.
+   - Advanced Filters still opens.
+   - Export action remains available.
+   - Applicants table and pagination render.
+   - Candidate Details still opens.
+   - Arabic RTL and English LTR do not visibly break.
+   - Light theme is polished; dark theme must remain usable.
+
+11. FINAL STATE
+   Leave the patch applied locally on the server for the owner to review.
+   DO NOT commit.
+   DO NOT push to THRS GitHub.
+
+FINAL REPORT — concise and factual
+Return:
+- THRS path used
+- pre-change HEAD and branch
+- backup directory
+- patch file + patch repo commit
+- `git apply --check`: PASS/FAIL
+- changed files
+- `git diff --check`: PASS/FAIL
+- build: PASS/FAIL
+- tests: PASS/FAIL (include whether any failure is pre-existing/unrelated)
+- deployment/reload action actually performed
+- live smoke test: PASS/FAIL with any specific issue
+- `git status --short`
+- Explicit final line: "No commit and no GitHub push were performed."
