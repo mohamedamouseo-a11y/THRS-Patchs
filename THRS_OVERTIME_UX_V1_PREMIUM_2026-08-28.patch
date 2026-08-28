@@ -1,0 +1,235 @@
+diff --git a/frontend/src/pages/OvertimeManagement.jsx b/frontend/src/pages/OvertimeManagement.jsx
+index 9dbcb4e..ca54ded 100644
+--- a/frontend/src/pages/OvertimeManagement.jsx
++++ b/frontend/src/pages/OvertimeManagement.jsx
+@@ -8,6 +8,7 @@ import Table from '../components/Common/Table';
+ import api from '../services/api';
+ import { formatDate, toDateKey } from '../utils/helpers';
+ import LordiconIcon from '../components/Common/LordiconIcon';
++import '../styles/thrs-overtime-v1-premium.css';
+ 
+ import { uiAlert } from '../utils/i18nDialogs';
+ const defaultRequestForm = {
+@@ -25,8 +26,8 @@ const defaultRejectionForm = {
+ const APPROVER_ROLES = ['SUPER_ADMIN', 'CEO', 'HR_ADMIN', 'HR_MANAGER', 'DEPARTMENT_MANAGER', 'TEAM_LEAD'];
+ 
+ const statusBadge = (status) => {
+-    const variant = status === 'APPROVED' ? 'success' : status === 'REJECTED' ? 'danger' : 'warning';
+-    return <span className={`badge badge-${variant}`}>{status}</span>;
++    const value = String(status || 'PENDING').toUpperCase();
++    return <span className={`thrs-ot-status thrs-ot-status--${value.toLowerCase()}`}>{value}</span>;
+ };
+ 
+ const OvertimeManagement = () => {
+@@ -41,6 +42,12 @@ const OvertimeManagement = () => {
+     const [rejectionForm, setRejectionForm] = useState(defaultRejectionForm);
+     const [currentUser, setCurrentUser] = useState(null);
+     const [employees, setEmployees] = useState([]);
++    const [activeTab, setActiveTab] = useState('requests');
++    const [searchFilter, setSearchFilter] = useState('');
++    const [statusFilter, setStatusFilter] = useState('');
++    const [monthFilter, setMonthFilter] = useState('');
++    const [page, setPage] = useState(1);
++    const [pageSize, setPageSize] = useState(25);
+ 
+     useEffect(() => {
+         fetchData();
+@@ -137,89 +144,126 @@ const OvertimeManagement = () => {
+         }
+     };
+ 
++    const visibleRequests = canApprove ? requests : myRequests;
++    const stats = useMemo(() => visibleRequests.reduce((acc, item) => {
++        const hours = Number(item.hours || 0);
++        acc.totalHours += hours;
++        if (item.status === 'PENDING') acc.pending += 1;
++        if (item.status === 'APPROVED') acc.approvedHours += hours;
++        if (item.status === 'REJECTED') acc.rejected += 1;
++        return acc;
++    }, { pending: 0, approvedHours: 0, rejected: 0, totalHours: 0 }), [visibleRequests]);
++
++    const filteredRequests = useMemo(() => visibleRequests.filter((item) => {
++        const name = item.employee ? `${item.employee.user?.firstName || ''} ${item.employee.user?.lastName || ''}`.trim() : 'Me';
++        const searchText = `${name} ${item.reason || ''}`.toLowerCase();
++        const dateKey = toDateKey(item.date);
++        const requestMonth = /^\d{4}-\d{2}/.test(dateKey) ? dateKey.slice(0, 7) : '';
++        return (!searchFilter.trim() || searchText.includes(searchFilter.trim().toLowerCase()))
++            && (!statusFilter || item.status === statusFilter)
++            && (!monthFilter || requestMonth === monthFilter);
++    }), [visibleRequests, searchFilter, statusFilter, monthFilter]);
++
++    const totalPages = Math.max(1, Math.ceil(filteredRequests.length / pageSize));
++    const safePage = Math.min(page, totalPages);
++    const pagedRequests = filteredRequests.slice((safePage - 1) * pageSize, safePage * pageSize);
++    const summaryRows = Object.values(summary).sort((a, b) => b.monthKey.localeCompare(a.monthKey) || b.hours - a.hours);
++
++    useEffect(() => {
++        setPage(1);
++    }, [searchFilter, statusFilter, monthFilter, pageSize]);
++
+     const requestColumns = [
+-        { header: 'Employee', render: row => row.employee ? `${row.employee.user?.firstName || ''} ${row.employee.user?.lastName || ''}` : 'Me' },
+-        { header: 'Date', render: row => formatDate(row.date) },
+-        { header: 'Hours', render: row => `${Number(row.hours || 0).toFixed(2)}h` },
+-        { header: 'Reason', render: row => row.reason },
+-        { header: 'Status', render: row => statusBadge(row.status || 'PENDING') },
++        {
++            header: 'Employee',
++            className: 'thrs-ot-col-employee',
++            render: row => {
++                const name = row.employee ? `${row.employee.user?.firstName || ''} ${row.employee.user?.lastName || ''}`.trim() : 'Me';
++                const initials = name.split(/\s+/).filter(Boolean).slice(0, 2).map(part => part[0]).join('').toUpperCase();
++                return <div className="thrs-ot-employee"><span>{initials || '—'}</span><strong>{name}</strong></div>;
++            }
++        },
++        { header: 'Date', className: 'thrs-ot-col-date', render: row => <span className="thrs-ot-date">{formatDate(row.date)}</span> },
++        { header: 'Hours', className: 'thrs-ot-col-hours', render: row => <strong className="thrs-ot-hours">{Number(row.hours || 0).toFixed(2)}h</strong> },
++        { header: 'Reason', className: 'thrs-ot-col-reason', render: row => <div className="thrs-ot-reason"><RichTextView content={row.reason || '—'} /></div> },
++        { header: 'Status', className: 'thrs-ot-col-status', render: row => statusBadge(row.status || 'PENDING') },
+         {
+             header: 'Actions',
++            className: 'thrs-ot-col-actions',
+             render: row => canApprove && row.status === 'PENDING' && row.sourceSystem !== 'TOS' ? (
+-                <div style={{ display: 'flex', gap: '8px' }}>
+-                    <Button variant="secondary" onClick={() => handleApprove(row.id)} style={{ padding: '4px 8px', fontSize: '12px' }}>
+-                        <LordiconIcon icon="✅" size={16} /> Approve
+-                    </Button>
+-                    <Button variant="danger" onClick={() => { setRejectionForm({ id: row.id, rejectionReason: '' }); setRejectionModalOpen(true); }} style={{ padding: '4px 8px', fontSize: '12px' }}>
+-                        <LordiconIcon icon="❌" size={16} /> Reject
+-                    </Button>
++                <div className="thrs-ot-actions">
++                    <Button variant="secondary" onClick={() => handleApprove(row.id)}>Approve</Button>
++                    <Button variant="danger" onClick={() => { setRejectionForm({ id: row.id, rejectionReason: '' }); setRejectionModalOpen(true); }}>Reject</Button>
+                 </div>
+-            ) : '-'
++            ) : <span className="thrs-ot-muted-action">—</span>
+         }
+     ];
+ 
+     if (loading) return <Loading />;
+ 
+-    const visibleRequests = canApprove ? requests : myRequests;
+-
+     return (
+-        <div className="fade-in thrs-page thrs-page-overtime-management thrs-content-operational">
+-            <div className="page-header thrs-page-header thrs-page-header--compact">
+-                <h1 className="page-title" style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+-                    <LordiconIcon icon="⏰" size={28} /> Overtime Management
+-                </h1>
+-                <Button onClick={() => setRequestModalOpen(true)}>Request Overtime</Button>
++        <div className="fade-in thrs-page thrs-page-overtime-management thrs-content-operational thrs-overtime-v1">
++            <div className="page-header thrs-page-header thrs-ot-hero">
++                <div className="thrs-ot-hero-copy">
++                    <span className="thrs-ot-hero-icon"><LordiconIcon icon="⏰" size={30} /></span>
++                    <div>
++                        <span className="thrs-ot-eyebrow">TIME & ATTENDANCE</span>
++                        <h1 className="page-title">Overtime Management</h1>
++                        <p>Review requests, approve extra hours, and track overtime in one focused workspace.</p>
++                    </div>
++                </div>
++                <Button onClick={() => setRequestModalOpen(true)} className="thrs-ot-request-btn">+ Request Overtime</Button>
+             </div>
+ 
+-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '16px', marginBottom: '24px' }}>
+-                <Card>
+-                    <div style={{ fontSize: '12px', color: '#64748b' }}>Pending Requests</div>
+-                    <div style={{ fontSize: '28px', fontWeight: 700 }}>{visibleRequests.filter(item => item.status === 'PENDING').length}</div>
+-                </Card>
+-                <Card>
+-                    <div style={{ fontSize: '12px', color: '#64748b' }}>Approved Hours</div>
+-                    <div style={{ fontSize: '28px', fontWeight: 700 }}>{visibleRequests.filter(item => item.status === 'APPROVED').reduce((sum, item) => sum + Number(item.hours || 0), 0).toFixed(2)}h</div>
+-                </Card>
++            <div className="thrs-ot-kpis">
++                <Card className="thrs-ot-kpi thrs-ot-kpi--amber"><span>Pending Requests</span><strong>{stats.pending}</strong><small>Awaiting a decision</small></Card>
++                <Card className="thrs-ot-kpi thrs-ot-kpi--green"><span>Approved Hours</span><strong>{stats.approvedHours.toFixed(2)}h</strong><small>Approved overtime</small></Card>
++                <Card className="thrs-ot-kpi thrs-ot-kpi--red"><span>Rejected</span><strong>{stats.rejected}</strong><small>Closed requests</small></Card>
++                <Card className="thrs-ot-kpi thrs-ot-kpi--blue"><span>Total Hours</span><strong>{stats.totalHours.toFixed(2)}h</strong><small>Across visible records</small></Card>
+             </div>
+ 
+-            <Card title="Overtime Requests" style={{ marginBottom: '24px' }}>
+-                <Table columns={requestColumns} data={visibleRequests} emptyMessage="No overtime requests found" />
+-            </Card>
++            <div className="thrs-ot-tabs">
++                <button type="button" className={activeTab === 'requests' ? 'is-active' : ''} onClick={() => setActiveTab('requests')}>Requests <span>{visibleRequests.length}</span></button>
++                <button type="button" className={activeTab === 'summary' ? 'is-active' : ''} onClick={() => setActiveTab('summary')}>Monthly Summary <span>{summaryRows.length}</span></button>
++            </div>
+ 
+-            <Card title="Monthly Overtime Summary" style={{ marginBottom: '24px' }}>
+-                {Object.values(summary).length === 0 ? (
+-                    <div style={{ color: '#64748b' }}>No summary available yet.</div>
+-                ) : (
+-                    <div style={{ display: 'grid', gap: '12px' }}>
+-                        {Object.values(summary).map(item => (
+-                            <div key={`${item.employeeName}-${item.monthKey}`} style={{ border: '1px solid #e2e8f0', borderRadius: '12px', padding: '16px' }}>
+-                                <div style={{ fontWeight: 700 }}>{item.employeeName}</div>
+-                                <div style={{ color: '#475569', fontSize: '13px', marginTop: '4px' }}>{item.monthKey}</div>
+-                                <div style={{ display: 'flex', gap: '16px', marginTop: '10px', flexWrap: 'wrap' }}>
+-                                    <span>Total: {item.hours.toFixed(2)}h</span>
+-                                    <span>Approved: {item.approvedHours.toFixed(2)}h</span>
+-                                    <span>Pending: {item.pendingHours.toFixed(2)}h</span>
+-                                </div>
+-                            </div>
+-                        ))}
++            {activeTab === 'requests' ? (
++                <>
++                    <div className="thrs-ot-filters">
++                        <label className="thrs-ot-search"><span>Search</span><input type="search" value={searchFilter} onChange={e => setSearchFilter(e.target.value)} placeholder="Employee or reason..." /></label>
++                        <label><span>Status</span><select value={statusFilter} onChange={e => setStatusFilter(e.target.value)}><option value="">All statuses</option><option value="PENDING">Pending</option><option value="APPROVED">Approved</option><option value="REJECTED">Rejected</option></select></label>
++                        <label><span>Month</span><input type="month" value={monthFilter} onChange={e => setMonthFilter(e.target.value)} /></label>
++                        <button type="button" onClick={() => { setSearchFilter(''); setStatusFilter(''); setMonthFilter(''); }} disabled={!searchFilter && !statusFilter && !monthFilter}>Clear filters</button>
+                     </div>
+-                )}
+-            </Card>
+ 
+-            <Card title="Overtime Rate Configuration">
+-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '16px' }}>
+-                    <div style={{ border: '1px solid #e2e8f0', borderRadius: '12px', padding: '16px', backgroundColor: '#f8fafc' }}>
+-                        <div style={{ fontSize: '12px', color: '#64748b' }}>Weekday Overtime Rate</div>
+-                        <div style={{ fontSize: '24px', fontWeight: 700 }}>{rateConfig.weekdayRate}x</div>
+-                    </div>
+-                    <div style={{ border: '1px solid #e2e8f0', borderRadius: '12px', padding: '16px', backgroundColor: '#f8fafc' }}>
+-                        <div style={{ fontSize: '12px', color: '#64748b' }}>Weekend / Holiday Rate</div>
+-                        <div style={{ fontSize: '24px', fontWeight: 700 }}>{rateConfig.weekendHolidayRate}x</div>
+-                    </div>
+-                </div>
+-                <div style={{ color: '#64748b', fontSize: '13px', marginTop: '12px' }}>
+-                    These defaults can be moved to system settings or payroll configuration later without changing the request workflow.
+-                </div>
++                    <Card className="thrs-ot-table-card">
++                        <div className="thrs-ot-section-head">
++                            <div><span>REQUEST QUEUE</span><h2>Overtime Requests</h2><p>Showing {filteredRequests.length ? ((safePage - 1) * pageSize) + 1 : 0}–{Math.min(safePage * pageSize, filteredRequests.length)} of {filteredRequests.length}</p></div>
++                            <label><span>Rows</span><select value={pageSize} onChange={e => setPageSize(Number(e.target.value))}><option value={10}>10</option><option value={25}>25</option><option value={50}>50</option></select></label>
++                        </div>
++                        <Table columns={requestColumns} data={pagedRequests} emptyMessage="No overtime requests match the current filters" wrapperClassName="thrs-ot-table-wrap" tableClassName="thrs-ot-table" />
++                        <div className="thrs-ot-pagination"><span>Page {safePage} of {totalPages}</span><div><button type="button" disabled={safePage === 1} onClick={() => setPage(p => Math.max(1, p - 1))}>Previous</button><button type="button" disabled={safePage === totalPages} onClick={() => setPage(p => Math.min(totalPages, p + 1))}>Next</button></div></div>
++                    </Card>
++                </>
++            ) : (
++                <Card className="thrs-ot-summary-card">
++                    <div className="thrs-ot-section-head"><div><span>MONTHLY BREAKDOWN</span><h2>Monthly Overtime Summary</h2><p>Compact employee-month totals instead of a long card stack.</p></div></div>
++                    {summaryRows.length === 0 ? <div className="thrs-ot-empty">No summary available yet.</div> : (
++                        <div className="thrs-ot-summary-grid">
++                            {summaryRows.map(item => (
++                                <article key={`${item.employeeName}-${item.monthKey}`}>
++                                    <div><strong>{item.employeeName}</strong><span>{item.monthKey}</span></div>
++                                    <div className="thrs-ot-summary-values"><span>Total <b>{item.hours.toFixed(2)}h</b></span><span>Approved <b>{item.approvedHours.toFixed(2)}h</b></span><span>Pending <b>{item.pendingHours.toFixed(2)}h</b></span></div>
++                                </article>
++                            ))}
++                        </div>
++                    )}
++                </Card>
++            )}
++
++            <Card className="thrs-ot-rate-card">
++                <div><span className="thrs-ot-eyebrow">RATE CONFIGURATION</span><h2>Overtime multipliers</h2><p>Reference values only — request and approval logic is unchanged.</p></div>
++                <div className="thrs-ot-rate-values"><span>Weekday <strong>{rateConfig.weekdayRate}x</strong></span><span>Weekend / Holiday <strong>{rateConfig.weekendHolidayRate}x</strong></span></div>
+             </Card>
+ 
+             <Modal isOpen={requestModalOpen} onClose={() => setRequestModalOpen(false)} title="Request Overtime">
+diff --git a/frontend/src/styles/thrs-overtime-v1-premium.css b/frontend/src/styles/thrs-overtime-v1-premium.css
+new file mode 100644
+index 0000000..f1e5946
+--- /dev/null
++++ b/frontend/src/styles/thrs-overtime-v1-premium.css
+@@ -0,0 +1 @@
++.thrs-overtime-v1{--ot-navy:#0b2f55;--ot-gold:#c8a34a;--ot-border:#dfe7f0;--ot-muted:#6b7d93;max-width:1440px;margin:0 auto;padding:26px 28px 48px}.thrs-overtime-v1::before{content:"";position:fixed;inset:72px 0 0;z-index:-1;background:radial-gradient(circle at 80% 0,rgba(200,163,74,.09),transparent 28%),radial-gradient(circle at 18% 5%,rgba(37,99,235,.06),transparent 30%),#f4f7fb;pointer-events:none}.thrs-overtime-v1 .thrs-ot-hero{min-height:122px;display:flex;align-items:center;justify-content:space-between;gap:22px;padding:22px 26px;margin-bottom:16px;border:1px solid var(--ot-border);border-radius:20px;background:linear-gradient(115deg,#fff 0,#fff 72%,#fbf8ef 100%);box-shadow:0 14px 34px rgba(15,46,81,.08)}.thrs-overtime-v1 .thrs-ot-hero-copy{display:flex;align-items:center;gap:17px}.thrs-overtime-v1 .thrs-ot-hero-icon{width:56px;height:56px;display:grid;place-items:center;border:1px solid rgba(200,163,74,.4);border-radius:16px;background:#fffaf0}.thrs-overtime-v1 .thrs-ot-eyebrow,.thrs-overtime-v1 .thrs-ot-section-head>div>span{display:block;margin-bottom:4px;color:var(--ot-gold);font-size:9px;font-weight:800;letter-spacing:.1em}.thrs-overtime-v1 .thrs-ot-hero h1{margin:0;color:var(--ot-navy);font-size:29px}.thrs-overtime-v1 .thrs-ot-hero p,.thrs-overtime-v1 .thrs-ot-rate-card p,.thrs-overtime-v1 .thrs-ot-section-head p{margin:5px 0 0;color:var(--ot-muted);font-size:11px}.thrs-overtime-v1 .thrs-ot-request-btn{min-height:42px;border-radius:11px;background:var(--ot-navy);border-color:var(--ot-navy)}.thrs-overtime-v1 .thrs-ot-kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:13px;margin-bottom:16px}.thrs-overtime-v1 .thrs-ot-kpi{min-height:104px!important;padding:16px!important;border:1px solid var(--ot-border)!important;border-radius:16px!important;box-shadow:0 8px 22px rgba(15,46,81,.055)!important}.thrs-overtime-v1 .thrs-ot-kpi span{display:block;color:#687b91;font-size:10px;font-weight:700}.thrs-overtime-v1 .thrs-ot-kpi strong{display:block;margin:4px 0 2px;color:var(--ot-navy);font-size:25px}.thrs-overtime-v1 .thrs-ot-kpi small{color:#97a4b3;font-size:9px}.thrs-overtime-v1 .thrs-ot-kpi--amber{border-top:3px solid #e4a11b!important}.thrs-overtime-v1 .thrs-ot-kpi--green{border-top:3px solid #22a65a!important}.thrs-overtime-v1 .thrs-ot-kpi--red{border-top:3px solid #e25555!important}.thrs-overtime-v1 .thrs-ot-kpi--blue{border-top:3px solid #3b82f6!important}.thrs-overtime-v1 .thrs-ot-tabs{display:grid;grid-template-columns:1fr 1fr;padding:4px;margin-bottom:13px;border:1px solid var(--ot-border);border-radius:13px;background:#fff}.thrs-overtime-v1 .thrs-ot-tabs button{height:40px;border:0;border-radius:9px;background:transparent;color:#718398;font:inherit;font-size:11px;font-weight:800;cursor:pointer}.thrs-overtime-v1 .thrs-ot-tabs button span{margin-left:5px;padding:2px 7px;border-radius:999px;background:#edf2f7;font-size:9px}.thrs-overtime-v1 .thrs-ot-tabs button.is-active{background:var(--ot-navy);color:#fff}.thrs-overtime-v1 .thrs-ot-tabs button.is-active span{background:rgba(255,255,255,.16)}.thrs-overtime-v1 .thrs-ot-filters{display:grid;grid-template-columns:minmax(280px,1.6fr) minmax(150px,.7fr) minmax(165px,.75fr) auto;align-items:end;gap:11px;padding:16px;margin-bottom:13px;border:1px solid var(--ot-border);border-radius:16px;background:#fff;box-shadow:0 8px 22px rgba(15,46,81,.05)}.thrs-overtime-v1 .thrs-ot-filters label,.thrs-overtime-v1 .thrs-ot-section-head label{display:grid;gap:5px}.thrs-overtime-v1 .thrs-ot-filters label>span,.thrs-overtime-v1 .thrs-ot-section-head label>span{color:#708296;font-size:8px;font-weight:800;text-transform:uppercase;letter-spacing:.06em}.thrs-overtime-v1 .thrs-ot-filters input,.thrs-overtime-v1 .thrs-ot-filters select,.thrs-overtime-v1 .thrs-ot-section-head select{height:39px;padding:0 11px;border:1px solid #d8e2ec;border-radius:9px;background:#fff;color:#30445d;font-size:11px;outline:none}.thrs-overtime-v1 .thrs-ot-filters input:focus,.thrs-overtime-v1 .thrs-ot-filters select:focus{border-color:#7ea5d0;box-shadow:0 0 0 3px rgba(37,99,235,.07)}.thrs-overtime-v1 .thrs-ot-filters>button{height:39px;padding:0 13px;border:1px solid #d8e2ec;border-radius:9px;background:#fff;color:var(--ot-navy);font:inherit;font-size:10px;font-weight:800;cursor:pointer}.thrs-overtime-v1 .thrs-ot-filters>button:disabled{opacity:.4;cursor:not-allowed}.thrs-overtime-v1 .thrs-ot-table-card,.thrs-overtime-v1 .thrs-ot-summary-card,.thrs-overtime-v1 .thrs-ot-rate-card{border:1px solid var(--ot-border)!important;border-radius:17px!important;background:#fff!important;box-shadow:0 14px 34px rgba(15,46,81,.07)!important;overflow:hidden}.thrs-overtime-v1 .thrs-ot-section-head{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:15px 17px;border-bottom:1px solid #edf1f5}.thrs-overtime-v1 .thrs-ot-section-head h2,.thrs-overtime-v1 .thrs-ot-rate-card h2{margin:0;color:var(--ot-navy);font-size:15px}.thrs-overtime-v1 .thrs-ot-section-head label{width:80px}.thrs-overtime-v1 .thrs-ot-table-wrap{max-height:none;overflow-x:auto;overflow-y:visible}.thrs-overtime-v1 .thrs-ot-table{min-width:900px;table-layout:fixed}.thrs-overtime-v1 .thrs-ot-table th{height:37px;padding:0 12px;background:#f8fafc;color:#71849a;border-bottom:1px solid #e5ecf4;font-size:8px;font-weight:800;text-transform:uppercase;letter-spacing:.05em}.thrs-overtime-v1 .thrs-ot-table td{padding:9px 12px;vertical-align:middle;border-bottom-color:#edf1f5}.thrs-overtime-v1 .thrs-ot-table tbody tr:hover td{background:#f8fbff}.thrs-overtime-v1 .thrs-ot-table tbody tr:has(.thrs-ot-status--pending) td{background:#fffdf8}.thrs-overtime-v1 .thrs-ot-table tbody tr:has(.thrs-ot-status--rejected) td{background:#fffafa}.thrs-overtime-v1 .thrs-ot-table .thrs-ot-col-employee{width:20%}.thrs-overtime-v1 .thrs-ot-table .thrs-ot-col-date{width:11%}.thrs-overtime-v1 .thrs-ot-table .thrs-ot-col-hours{width:8%}.thrs-overtime-v1 .thrs-ot-table .thrs-ot-col-reason{width:37%}.thrs-overtime-v1 .thrs-ot-table .thrs-ot-col-status{width:11%}.thrs-overtime-v1 .thrs-ot-table .thrs-ot-col-actions{width:13%}.thrs-overtime-v1 .thrs-ot-employee{display:flex;align-items:center;gap:8px;min-width:0}.thrs-overtime-v1 .thrs-ot-employee>span{width:31px;height:31px;flex:0 0 31px;display:grid;place-items:center;border-radius:50%;background:linear-gradient(145deg,#0f4b7d,#0a3159);color:#fff;font-size:9px;font-weight:800}.thrs-overtime-v1 .thrs-ot-employee strong{overflow:hidden;color:#2a3c53;font-size:11px;text-overflow:ellipsis;white-space:nowrap}.thrs-overtime-v1 .thrs-ot-date{color:#5d7086;font-size:10px}.thrs-overtime-v1 .thrs-ot-hours{color:var(--ot-navy);font-size:11px}.thrs-overtime-v1 .thrs-ot-reason{display:-webkit-box;overflow:hidden;color:#50647b;font-size:10px;line-height:1.45;-webkit-box-orient:vertical;-webkit-line-clamp:2}.thrs-overtime-v1 .thrs-ot-reason .rich-text-view,.thrs-overtime-v1 .thrs-ot-reason p{margin:0;font:inherit;line-height:inherit}.thrs-overtime-v1 .thrs-ot-status{display:inline-flex;align-items:center;padding:4px 9px;border:1px solid transparent;border-radius:999px;font-size:8px;font-weight:800}.thrs-overtime-v1 .thrs-ot-status--approved{border-color:#cbe9d6;background:#edf9f1;color:#158044}.thrs-overtime-v1 .thrs-ot-status--pending{border-color:#f2dcae;background:#fff7e5;color:#ad6907}.thrs-overtime-v1 .thrs-ot-status--rejected{border-color:#f1c9c9;background:#fff0f0;color:#c83f3f}.thrs-overtime-v1 .thrs-ot-actions{display:flex;gap:5px}.thrs-overtime-v1 .thrs-ot-actions .thrs-btn{min-height:29px;padding:0 8px;border-radius:7px;font-size:9px}.thrs-overtime-v1 .thrs-ot-muted-action{color:#b4bec9}.thrs-overtime-v1 .thrs-ot-pagination{min-height:52px;display:flex;align-items:center;justify-content:space-between;padding:9px 16px;border-top:1px solid #edf1f5;background:#fbfcfe;color:#718398;font-size:10px}.thrs-overtime-v1 .thrs-ot-pagination>div{display:flex;gap:6px}.thrs-overtime-v1 .thrs-ot-pagination button{height:30px;padding:0 10px;border:1px solid #d8e2ec;border-radius:7px;background:#fff;color:var(--ot-navy);font:inherit;font-size:9px;font-weight:800}.thrs-overtime-v1 .thrs-ot-pagination button:disabled{opacity:.4}.thrs-overtime-v1 .thrs-ot-summary-card{margin-bottom:14px}.thrs-overtime-v1 .thrs-ot-summary-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;max-height:520px;overflow:auto;padding:14px}.thrs-overtime-v1 .thrs-ot-summary-grid article{padding:12px;border:1px solid #e5ebf2;border-radius:11px;background:#fbfcfe}.thrs-overtime-v1 .thrs-ot-summary-grid article>div:first-child{display:flex;align-items:center;justify-content:space-between;gap:8px}.thrs-overtime-v1 .thrs-ot-summary-grid article strong{color:#2a3c53;font-size:10px}.thrs-overtime-v1 .thrs-ot-summary-grid article>div:first-child span{color:#8797a8;font-size:8px}.thrs-overtime-v1 .thrs-ot-summary-values{display:grid;grid-template-columns:repeat(3,1fr);gap:5px;margin-top:9px}.thrs-overtime-v1 .thrs-ot-summary-values span{display:grid;gap:2px;color:#8292a5;font-size:7px}.thrs-overtime-v1 .thrs-ot-summary-values b{color:var(--ot-navy);font-size:9px}.thrs-overtime-v1 .thrs-ot-empty{padding:30px;text-align:center;color:#8797a8;font-size:11px}.thrs-overtime-v1 .thrs-ot-rate-card{display:flex;align-items:center;justify-content:space-between;gap:18px;padding:15px 17px!important;margin-top:14px}.thrs-overtime-v1 .thrs-ot-rate-values{display:grid;grid-template-columns:repeat(2,minmax(140px,1fr));gap:8px}.thrs-overtime-v1 .thrs-ot-rate-values>span{padding:9px 12px;border:1px solid #e0e8f1;border-radius:9px;background:#f8fafc;color:#7c8da1;font-size:8px}.thrs-overtime-v1 .thrs-ot-rate-values strong{display:block;margin-top:2px;color:var(--ot-navy);font-size:17px}@media(max-width:1100px){.thrs-overtime-v1 .thrs-ot-kpis{grid-template-columns:repeat(2,1fr)}.thrs-overtime-v1 .thrs-ot-filters{grid-template-columns:1fr 1fr}.thrs-overtime-v1 .thrs-ot-summary-grid{grid-template-columns:repeat(2,1fr)}}@media(max-width:720px){.thrs-overtime-v1{padding:18px 12px 34px}.thrs-overtime-v1 .thrs-ot-hero,.thrs-overtime-v1 .thrs-ot-rate-card{align-items:stretch;flex-direction:column}.thrs-overtime-v1 .thrs-ot-kpis,.thrs-overtime-v1 .thrs-ot-filters,.thrs-overtime-v1 .thrs-ot-summary-grid{grid-template-columns:1fr}.thrs-overtime-v1 .thrs-ot-request-btn{width:100%}.thrs-overtime-v1 .thrs-ot-section-head{align-items:stretch;flex-direction:column}.thrs-overtime-v1 .thrs-ot-section-head label{width:100%}.thrs-overtime-v1 .thrs-ot-rate-values{width:100%;grid-template-columns:1fr 1fr}}
