@@ -1,0 +1,137 @@
+TASK: Apply THRS Recruitment V12 Final Composition to the EXISTING live THRS deployment. This is the final composition pass after V9/V10/V11. It is a UI/UX-only consolidation and must make the Recruitment page wider, more balanced, more premium, and much closer to the approved reference composition while preserving all current functionality.
+
+PATCH SOURCE
+- Patch repo: https://github.com/mohamedamouseo-a11y/THRS-Patchs.git
+- Patch file: THRS_RECRUITMENT_V12_FINAL_COMPOSITION_2026-08-28.patch
+- Patch commit: 02ccb06860115356b2687ca13d9ad55b8b17016d
+
+EXPECTED SERVER STATE
+V11 is currently deployed locally on top of V9 and V10. Before applying anything, verify frontend/src/pages/Recruitment.jsx currently imports all three in this order:
+1) ../styles/thrs-recruitment-v9-premium.css
+2) ../styles/thrs-recruitment-v10-polish.css
+3) ../styles/thrs-recruitment-v11-reference-match.css
+Also verify all three CSS files exist locally.
+If this exact precondition is not true, STOP and report. Do not improvise.
+
+WHAT V12 DOES
+V12 consolidates the Recruitment visual layer into ONE active stylesheet:
+- Removes the three V9/V10/V11 imports from Recruitment.jsx.
+- Adds one import: ../styles/thrs-recruitment-v12-final-composition.css
+- Leaves the old V9/V10/V11 CSS files physically present on disk for rollback/reference, but they are no longer imported or active.
+- Does NOT alter business logic, APIs, database, filters behavior, status changes, pagination logic, drawers, candidate data, jobs logic, routes, auth, or backend.
+
+VISUAL GOALS
+The final desktop page should immediately look wider and better composed than V11:
+- Main Recruitment content uses up to roughly 1400px instead of being compressed in the center.
+- Continuous soft #F5F8FC-like page background with no awkward large visual bands.
+- Hero is larger and stronger, with more breathing room and a larger Recruitment title/icon.
+- KPI cards are about 15–20% larger, still exactly 5 across on normal desktop.
+- Pipeline remains two rows of five stages, but cards are larger, counts clearer, and progress line/dot treatment stronger.
+- Reduce wasted vertical space between Pipeline → Tabs → Filters → Applicants table.
+- Tabs are compact and visually connected to the workflow.
+- Filters: search gets the majority of the first row; Export + Advanced Filters sit to the right; five primary filter groups align below; Clear all filters is a small link-style control at the bottom.
+- Applicants table is significantly easier to read: wider Applicant and Job columns, approximately 60px rows, stronger hover, no internal vertical scroll box.
+- Desktop visible table keeps the simplified columns: Applicant / Job-Department / Status / Source / Applied Date / Action. Level / Rating / Task remain available in underlying data/details but are visually hidden in the list.
+- Action control visually resembles eye + overflow menu while keeping the existing Details click behavior.
+- Pagination stays functional and visually integrated in the table footer.
+- The result must be obviously different from V11 at first glance.
+
+HARD SAFETY RULES
+- UI/UX ONLY.
+- NO backend changes.
+- NO API changes.
+- NO database/schema/data changes.
+- NO route/auth/permissions changes.
+- NO Nginx config changes.
+- NO PM2 config changes.
+- NO DNS/SSL/ports/env changes.
+- DO NOT commit.
+- DO NOT push.
+- DO NOT stage unrelated files.
+- DO NOT run git reset --hard, git clean, force checkout, --3way, --reject, or fuzzy/manual application.
+- CRITICAL: If `git apply --numstat` or `git apply --check` fails for any reason, STOP and return the exact error. DO NOT MANUALLY APPLY THE PATCH.
+
+EXECUTION STEPS
+1) Locate and verify the live THRS checkout. Expected path is /var/www/tamiyouz_hr if unchanged.
+   Run:
+   pwd
+   git rev-parse --show-toplevel
+   git rev-parse HEAD
+   git branch --show-current
+   git status --short
+
+2) Verify V11 precondition:
+   grep -n "thrs-recruitment-v9-premium\|thrs-recruitment-v10-polish\|thrs-recruitment-v11-reference-match\|thrs-recruitment-v12-final-composition" frontend/src/pages/Recruitment.jsx || true
+   test -f frontend/src/styles/thrs-recruitment-v9-premium.css
+   test -f frontend/src/styles/thrs-recruitment-v10-polish.css
+   test -f frontend/src/styles/thrs-recruitment-v11-reference-match.css
+
+3) Create a timestamped pre-V12 backup containing at least:
+   frontend/src/pages/Recruitment.jsx
+   frontend/src/styles/thrs-recruitment-v9-premium.css
+   frontend/src/styles/thrs-recruitment-v10-polish.css
+   frontend/src/styles/thrs-recruitment-v11-reference-match.css
+Use the existing /var/www/tamiyouz_hr/backups convention.
+
+4) Obtain exactly:
+   THRS_RECRUITMENT_V12_FINAL_COMPOSITION_2026-08-28.patch
+from THRS-Patchs commit:
+   02ccb06860115356b2687ca13d9ad55b8b17016d
+
+5) From THRS repo root run:
+   git apply --numstat /path/to/THRS_RECRUITMENT_V12_FINAL_COMPOSITION_2026-08-28.patch
+   git apply --check /path/to/THRS_RECRUITMENT_V12_FINAL_COMPOSITION_2026-08-28.patch
+Both MUST PASS. If either fails: STOP. NO MANUAL APPLY.
+
+6) Apply exactly once:
+   git apply /path/to/THRS_RECRUITMENT_V12_FINAL_COMPOSITION_2026-08-28.patch
+
+7) Verify scope immediately:
+   git status --short
+   grep -n "thrs-recruitment-v9-premium\|thrs-recruitment-v10-polish\|thrs-recruitment-v11-reference-match\|thrs-recruitment-v12-final-composition" frontend/src/pages/Recruitment.jsx || true
+   git diff -- frontend/src/pages/Recruitment.jsx frontend/src/styles/thrs-recruitment-v12-final-composition.css
+Expected active import after V12: ONLY the V12 stylesheet. Old V9/V10/V11 files should still exist but should no longer be imported.
+
+8) Build frontend:
+   cd frontend
+   npm run build
+Build must pass. If it fails because of V12, STOP and report. Do not edit unrelated files to fix it.
+
+9) Deploy/reload using ONLY the current established THRS deployment method. Do not change deployment architecture/config. Reload only what this installation already normally reloads.
+
+10) Smoke test:
+- https://hr.tamiyouzplaform.com/recruitment => HTTP 200
+- https://hr.tamiyouzplaform.com/ => HTTP 200
+- built CSS contains `--r12-navy` and `thrs-rec-v7-stage-flow`
+- Recruitment.jsx imports V12 and no longer imports V9/V10/V11
+
+11) Visual sanity check if browser/screenshot capability exists:
+Confirm:
+- content visibly wider than V11
+- 5 KPI cards across
+- pipeline two rows of five
+- reduced blank vertical gaps
+- search dominates first filter row with Export + Advanced Filters right-aligned
+- applicant/job columns visibly wider
+- Level/Rating/Task hidden in desktop list
+- no internal vertical table scrollbar
+- row height around 60px
+If screenshot tooling is unavailable, state that clearly and do not install unrelated browser packages.
+
+FINAL REPORT MUST INCLUDE
+- exact THRS path
+- backup path
+- V11 precondition result
+- git apply --numstat result
+- git apply --check result
+- changed files
+- confirmation V9/V10/V11 files still exist but imports are removed
+- npm build result
+- deployment/reload action actually taken
+- HTTP smoke results
+- visual sanity result if available
+- final git status --short
+- explicit: NO COMMIT / NO PUSH
+
+End exactly with:
+FINAL_MARKER=THRS_RECRUITMENT_V12_FINAL_COMPOSITION_DEPLOYED_OK
