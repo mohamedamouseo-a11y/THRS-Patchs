@@ -1,7 +1,7 @@
 diff --git a/backend/src/controllers/recruitment.controller.js b/backend/src/controllers/recruitment.controller.js
 --- a/backend/src/controllers/recruitment.controller.js
 +++ b/backend/src/controllers/recruitment.controller.js
-@@ -42,12 +42,25 @@ exports.getAllJobs = async (req, res, next) => {
+@@ -42,12 +42,25 @@
      const { status } = req.query;
      const where = {};
      if (status) where.status = status;
@@ -35,9 +35,7 @@ diff --git a/backend/src/controllers/recruitment.controller.js b/backend/src/con
 diff --git a/frontend/src/pages/Recruitment.jsx b/frontend/src/pages/Recruitment.jsx
 --- a/frontend/src/pages/Recruitment.jsx
 +++ b/frontend/src/pages/Recruitment.jsx
-@@ -556,10 +556,11 @@ const Recruitment = () => {
-   const [selectedApp, setSelectedApp] = useState(null);
-   const [showDetailModal, setShowDetailModal] = useState(false);
+@@ -560,6 +560,7 @@
    const [detailQueryId, setDetailQueryId] = useState(() => searchParams.get('id') || '');
    const [showJobModal, setShowJobModal] = useState(false);
    const [jobs, setJobs] = useState([]);
@@ -45,15 +43,7 @@ diff --git a/frontend/src/pages/Recruitment.jsx b/frontend/src/pages/Recruitment
    const [editingJob, setEditingJob] = useState(null);
    const [jobForm, setJobForm] = useState(DEFAULT_JOB_FORM);
    const [jobEditorMode, setJobEditorMode] = useState('description');
- 
-@@ -591,15 +592,16 @@ const Recruitment = () => {
-   }));
- 
-   const fetchStatsAndJobs = useCallback(async () => {
-     try {
-       const [statsRes, jobsRes] = await Promise.all([
-         api.get('/recruitment/stats'),
-         api.get('/recruitment/jobs')
+@@ -600,6 +601,7 @@
        ]);
        setStats(statsRes.stats || null);
        setJobs(jobsRes.jobs || []);
@@ -61,14 +51,7 @@ diff --git a/frontend/src/pages/Recruitment.jsx b/frontend/src/pages/Recruitment
      } catch (error) {
        console.error('Failed to fetch recruitment stats/jobs:', error);
      }
-   }, []);
- 
-@@ -1046,15 +1048,19 @@ const Recruitment = () => {
-       await api.delete(`/recruitment/jobs/${job.id}`);
-       fetchStatsAndJobs();
-     } catch (error) {
-       uiAlert(error.message || pageCopy.deleteJobFailed);
-     }
+@@ -1051,7 +1053,11 @@
    };
  
    const jobTitleOptions = Array.from(new Set(
@@ -82,5 +65,3 @@ diff --git a/frontend/src/pages/Recruitment.jsx b/frontend/src/pages/Recruitment
 +  )).sort((a, b) => a.localeCompare(b, langKey === 'ar' ? 'ar' : 'en', { sensitivity: 'base' }));
  
    const appColumns = [
-     {
-       header: pageCopy.table.headers.applicant,
