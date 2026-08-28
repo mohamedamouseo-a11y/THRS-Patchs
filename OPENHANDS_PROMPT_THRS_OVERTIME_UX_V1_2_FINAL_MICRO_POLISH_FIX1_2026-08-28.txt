@@ -1,0 +1,167 @@
+TASK: Apply corrected THRS Overtime UX V1.2 Final Micro-Polish FIX1 on top of the restored working V1.1 state.
+
+LIVE PROJECT:
+/var/www/tamiyouz_hr
+
+PATCH REPOSITORY:
+https://github.com/mohamedamouseo-a11y/THRS-Patchs.git
+
+PATCH FILE:
+THRS_OVERTIME_UX_V1_2_FINAL_MICRO_POLISH_FIX1_2026-08-28.patch
+
+EXACT PATCH COMMIT:
+483ed8e43767f115d383fb4702b0054e78d9a8f5
+
+EXPECTED PATCH BLOB:
+caaac76de09f9a12bea72ff8bac39b72a3376683
+
+CURRENT STATE:
+The live site has been restored to the last known-good Overtime V1.1 state after the previous malformed V1.2 build attempt.
+Expected existing local overtime files:
+- frontend/src/pages/OvertimeManagement.jsx
+- frontend/src/styles/thrs-overtime-v1-premium.css
+- frontend/src/styles/thrs-overtime-v1-1-final-polish.css
+The broken V1.2 CSS file must NOT exist before this attempt.
+
+DO NOT COMMIT.
+DO NOT PUSH.
+DO NOT GIT ADD.
+DO NOT modify backend, DB, Prisma, auth, routes, PM2 config, Nginx config, mobile/TamiyouzHRMobile, backups, or unrelated files.
+
+1) PRE-CHECK
+cd /var/www/tamiyouz_hr
+git rev-parse HEAD
+git status --short
+
+Confirm OvertimeManagement.jsx contains both imports:
+import '../styles/thrs-overtime-v1-premium.css';
+import '../styles/thrs-overtime-v1-1-final-polish.css';
+
+Confirm it does NOT contain:
+import '../styles/thrs-overtime-v1-2-final-micro-polish.css';
+
+Confirm this file does NOT exist:
+frontend/src/styles/thrs-overtime-v1-2-final-micro-polish.css
+
+If V1.2 is partially present, STOP. Do not manually reconcile.
+
+2) FETCH EXACT PATCH
+Use a separate temporary clone/directory for THRS-Patchs.
+Fetch/checkout exact commit:
+483ed8e43767f115d383fb4702b0054e78d9a8f5
+
+Verify patch hash-object exactly equals:
+caaac76de09f9a12bea72ff8bac39b72a3376683
+
+If mismatch: STOP.
+
+3) PATCH PREFLIGHT
+From /var/www/tamiyouz_hr run:
+git apply --numstat /path/to/THRS_OVERTIME_UX_V1_2_FINAL_MICRO_POLISH_FIX1_2026-08-28.patch
+git apply --check /path/to/THRS_OVERTIME_UX_V1_2_FINAL_MICRO_POLISH_FIX1_2026-08-28.patch
+
+Both MUST pass.
+Do not use --3way, --reject, manual reproduction, reset, checkout, stash, or clean.
+
+4) APPLY ONCE
+git apply /path/to/THRS_OVERTIME_UX_V1_2_FINAL_MICRO_POLISH_FIX1_2026-08-28.patch
+
+Expected V1.2 FIX1 changes only:
+- frontend/src/pages/OvertimeManagement.jsx adds one V1.2 CSS import
+- frontend/src/styles/thrs-overtime-v1-2-final-micro-polish.css is created
+
+5) CSS SYNTAX GATE BEFORE ANY BUILD
+First verify the file ends with the explicit EOF marker AFTER the closing media-query brace:
+/* EOF — intentionally after the media-query closing brace. */
+
+Run a brace audit on the NEW CSS file and require open braces == close braces.
+Expected: 20 opening braces and 20 closing braces.
+
+Then, from /var/www/tamiyouz_hr/frontend, attempt a PostCSS parse if the existing dependency is available:
+node -e "const fs=require('fs'); const postcss=require('postcss'); postcss.parse(fs.readFileSync('src/styles/thrs-overtime-v1-2-final-micro-polish.css','utf8')); console.log('POSTCSS_PARSE_OK')"
+
+If PostCSS is unavailable, report that fact and continue only because the brace gate passed.
+If PostCSS reports a CSS syntax error: STOP BEFORE BUILD.
+
+6) SAFE BUILD — DO NOT BUILD INTO THE LIVE frontend/build DIRECTORY
+The previous failed build emptied the live build directory. Do NOT repeat that.
+
+Create a temporary build destination:
+rm -rf /tmp/thrs-overtime-v12-fix1-build
+
+From /var/www/tamiyouz_hr/frontend run:
+BUILD_PATH=/tmp/thrs-overtime-v12-fix1-build CI=false npm run build
+
+The temporary build MUST pass and contain:
+/tmp/thrs-overtime-v12-fix1-build/index.html
+/tmp/thrs-overtime-v12-fix1-build/static/
+
+If build fails:
+STOP.
+Do NOT touch /var/www/tamiyouz_hr/frontend/build.
+The currently working V1.1 live site must remain online.
+
+7) DEPLOY ONLY AFTER SUCCESSFUL TEMP BUILD
+Do not change Nginx configuration.
+Deploy the already-successful temporary build while keeping the existing live build available until the new assets are ready.
+
+Copy static/new assets first, then replace index.html LAST. A safe example:
+mkdir -p /var/www/tamiyouz_hr/frontend/build
+rsync -a /tmp/thrs-overtime-v12-fix1-build/static/ /var/www/tamiyouz_hr/frontend/build/static/
+rsync -a --exclude='index.html' --exclude='static/' /tmp/thrs-overtime-v12-fix1-build/ /var/www/tamiyouz_hr/frontend/build/
+cp /tmp/thrs-overtime-v12-fix1-build/index.html /var/www/tamiyouz_hr/frontend/build/index.html
+
+Do not delete the old build before the successful temporary build exists.
+No PM2 restart.
+No Nginx config edits.
+Nginx reload is not required for static file replacement; only reload if the established deployment procedure strictly requires it, after nginx -t passes.
+
+8) SMOKE TEST
+Verify HTTP 200:
+https://hr.tamiyouzplaform.com/overtime
+https://hr.tamiyouzplaform.com/
+
+9) V1.2 VISUAL VALIDATION
+Confirm:
+- Requests / Monthly Summary is a compact content-width segmented control on desktop.
+- No long empty full-width tab bar.
+- Overtime Requests table has no nested vertical scrollbar.
+- Page itself owns vertical scrolling.
+- Horizontal table scrolling remains possible on narrow widths.
+- Pagination stays below the table.
+- Overtime multipliers is a compact horizontal reference bar, roughly 90–110px high on desktop.
+- Weekday and Weekend/Holiday values remain visible.
+
+Confirm existing functionality remains unchanged:
+Search, Status filter, Month filter, Clear filters, 10/25/50 page size, Previous/Next, Requests tab, Monthly Summary tab, Request Overtime modal, Approve, Reject, and sourceSystem !== 'TOS' rule.
+Do not mutate real overtime records during validation.
+
+10) FINAL SCOPE CHECK
+git diff --check
+git status --short
+
+Expected overtime local state:
+ M frontend/src/pages/OvertimeManagement.jsx
+?? frontend/src/styles/thrs-overtime-v1-premium.css
+?? frontend/src/styles/thrs-overtime-v1-1-final-polish.css
+?? frontend/src/styles/thrs-overtime-v1-2-final-micro-polish.css
+
+Do not stage or include mobile/TamiyouzHRMobile or any unrelated files.
+
+11) FINAL REPORT
+Return:
+- HEAD SHA
+- exact patch commit and blob verification
+- numstat/check output
+- CSS brace counts
+- PostCSS parse result
+- temporary build result/path
+- confirmation live build was untouched until temp build succeeded
+- exact files changed
+- deployment result
+- HTTP smoke results
+- visual validation for the 3 V1.2 refinements
+- final git status
+- confirmation NO COMMIT and NO PUSH
+
+FINAL_MARKER=THRS_OVERTIME_UX_V1_2_FINAL_MICRO_POLISH_FIX1_DEPLOYED_OK
