@@ -1,0 +1,197 @@
+diff --git a/frontend/src/pages/Recruitment.jsx b/frontend/src/pages/Recruitment.jsx
+--- a/frontend/src/pages/Recruitment.jsx
++++ b/frontend/src/pages/Recruitment.jsx
+@@
+ import HelpTooltip from '../components/Common/HelpTooltip';
+ import { RECRUITMENT_TOOLTIPS } from '../utils/tooltips';
+ import '../styles/thrs-recruitment-v9-premium.css';
++import '../styles/thrs-recruitment-v10-polish.css';
+ 
+ import { uiAlert, uiConfirm } from '../utils/i18nDialogs';
+diff --git a/frontend/src/styles/thrs-recruitment-v10-polish.css b/frontend/src/styles/thrs-recruitment-v10-polish.css
+new file mode 100644
+--- /dev/null
++++ b/frontend/src/styles/thrs-recruitment-v10-polish.css
+@@
++/* THRS Recruitment V10 Polish
++   Small visual refinement layer on top of V9.
++   Scope: pipeline readability, filter header restoration,
++   applicant-table readability, and vertical rhythm only.
++*/
++
++.thrs-page-recruitment.thrs-recruitment-ux-v5 {
++  --rec-v10-section-gap: 24px;
++}
++
++/* 1) Pipeline: increase readability without changing behavior. */
++.thrs-page-recruitment.thrs-recruitment-ux-v5 .thrs-rec-v7-pipeline-panel {
++  padding: 24px 22px 20px;
++  margin-bottom: var(--rec-v10-section-gap);
++}
++
++.thrs-page-recruitment.thrs-recruitment-ux-v5 .thrs-rec-v7-pipeline-head {
++  margin-bottom: 18px;
++  align-items: flex-start;
++}
++
++.thrs-page-recruitment.thrs-recruitment-ux-v5 .thrs-rec-v7-stage-flow {
++  display: grid;
++  grid-template-columns: repeat(5, minmax(0, 1fr));
++  gap: 10px;
++  align-items: stretch;
++}
++
++.thrs-page-recruitment.thrs-recruitment-ux-v5 .thrs-rec-v7-stage-card {
++  min-height: 74px;
++  padding: 10px 12px;
++  border-radius: 12px;
++}
++
++.thrs-page-recruitment.thrs-recruitment-ux-v5 .thrs-rec-v7-stage-copy strong {
++  font-size: 12px;
++  line-height: 1.25;
++  white-space: normal;
++}
++
++.thrs-page-recruitment.thrs-recruitment-ux-v5 .thrs-rec-v7-stage-copy b {
++  font-size: 17px;
++  line-height: 1;
++}
++
++.thrs-page-recruitment.thrs-recruitment-ux-v5 .thrs-rec-v7-stage-copy small {
++  font-size: 10px;
++}
++
++.thrs-page-recruitment.thrs-recruitment-ux-v5 .thrs-rec-v7-stage-number {
++  min-width: 24px;
++  height: 24px;
++  font-size: 11px;
++}
++
++.thrs-page-recruitment.thrs-recruitment-ux-v5 .thrs-rec-v7-stage-icon {
++  width: 27px;
++  height: 27px;
++}
++
++/* Grid already communicates flow; remove the tiny inline arrows. */
++.thrs-page-recruitment.thrs-recruitment-ux-v5 .thrs-rec-v7-stage-connector {
++  display: none;
++}
++
++.thrs-page-recruitment.thrs-recruitment-ux-v5 .thrs-rec-v7-timeline {
++  margin-top: 12px;
++  opacity: .72;
++}
++
++/* 2) Restore the filters heading/actions block that V9 visually compressed. */
++.thrs-page-recruitment.thrs-recruitment-ux-v5 .thrs-recruitment-filter-card > div {
++  padding: 20px 22px 22px !important;
++}
++
++.thrs-page-recruitment.thrs-recruitment-ux-v5 .thrs-rec-v6-filter-head {
++  display: flex !important;
++  align-items: center;
++  justify-content: space-between;
++  gap: 16px;
++  margin-bottom: 16px;
++}
++
++.thrs-page-recruitment.thrs-recruitment-ux-v5 .thrs-rec-v6-filter-title {
++  display: flex !important;
++  align-items: center;
++  gap: 10px;
++}
++
++.thrs-page-recruitment.thrs-recruitment-ux-v5 .thrs-rec-v6-filter-title-main {
++  display: block !important;
++  font-size: 14px;
++  font-weight: 800;
++  color: var(--text-primary, #0f2742);
++}
++
++.thrs-page-recruitment.thrs-recruitment-ux-v5 .thrs-rec-v6-filter-title-sub {
++  display: block !important;
++  margin-top: 2px;
++  font-size: 11px;
++  color: var(--text-secondary, #64748b);
++}
++
++.thrs-page-recruitment.thrs-recruitment-ux-v5 .thrs-rec-v6-filter-actions {
++  display: flex !important;
++  align-items: center;
++  gap: 8px;
++  flex-wrap: wrap;
++}
++
++.thrs-page-recruitment.thrs-recruitment-ux-v5 .thrs-rec-v6-search-field {
++  margin-bottom: 14px;
++}
++
++/* 3) Applicant table: slightly larger, easier-to-scan rows. */
++.thrs-page-recruitment.thrs-recruitment-ux-v5 .thrs-rec-v6-app-table .modern-table th {
++  padding-top: 12px;
++  padding-bottom: 12px;
++  font-size: 10.5px;
++  letter-spacing: .015em;
++}
++
++.thrs-page-recruitment.thrs-recruitment-ux-v5 .thrs-rec-v6-app-table .modern-table td {
++  padding-top: 12px;
++  padding-bottom: 12px;
++  font-size: 12px;
++  line-height: 1.35;
++}
++
++.thrs-page-recruitment.thrs-recruitment-ux-v5 .thrs-rec-v6-app-table .modern-table-row {
++  min-height: 58px;
++}
++
++.thrs-page-recruitment.thrs-recruitment-ux-v5 .thrs-rec-v6-app-table .modern-table-row:hover {
++  background: rgba(31, 91, 155, .035);
++}
++
++.thrs-page-recruitment.thrs-recruitment-ux-v5 .thrs-rec-v5-table-head h3 {
++  font-size: 15px;
++  line-height: 1.3;
++}
++
++.thrs-page-recruitment.thrs-recruitment-ux-v5 .thrs-rec-v5-table-head p {
++  font-size: 11px;
++}
++
++/* 4) Normalize vertical rhythm between the major dashboard blocks. */
++.thrs-page-recruitment.thrs-recruitment-ux-v5 .thrs-recruitment-tabs {
++  margin-bottom: var(--rec-v10-section-gap) !important;
++}
++
++.thrs-page-recruitment.thrs-recruitment-ux-v5 .thrs-recruitment-filter-card {
++  margin-bottom: var(--rec-v10-section-gap) !important;
++}
++
++.thrs-page-recruitment.thrs-recruitment-ux-v5 .thrs-rec-v6-app-table,
++.thrs-page-recruitment.thrs-recruitment-ux-v5 .thrs-rec-v5-jobs-card {
++  margin-bottom: var(--rec-v10-section-gap);
++}
++
++@media (max-width: 1180px) {
++  .thrs-page-recruitment.thrs-recruitment-ux-v5 .thrs-rec-v7-stage-flow {
++    grid-template-columns: repeat(2, minmax(0, 1fr));
++  }
++
++  .thrs-page-recruitment.thrs-recruitment-ux-v5 .thrs-rec-v6-filter-head {
++    align-items: flex-start;
++    flex-direction: column;
++  }
++}
++
++@media (max-width: 720px) {
++  .thrs-page-recruitment.thrs-recruitment-ux-v5 .thrs-rec-v7-stage-flow {
++    grid-template-columns: 1fr;
++  }
++
++  .thrs-page-recruitment.thrs-recruitment-ux-v5 .thrs-rec-v7-pipeline-panel,
++  .thrs-page-recruitment.thrs-recruitment-ux-v5 .thrs-recruitment-filter-card > div {
++    padding-left: 14px !important;
++    padding-right: 14px !important;
++  }
++}
