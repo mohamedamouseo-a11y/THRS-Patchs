@@ -1,0 +1,832 @@
+diff --git a/frontend/src/pages/Recruitment.jsx b/frontend/src/pages/Recruitment.jsx
+index 30ed237..f180d9b 100644
+--- a/frontend/src/pages/Recruitment.jsx
++++ b/frontend/src/pages/Recruitment.jsx
+@@ -10,6 +10,7 @@ import { formatDate, formatDateTime, getStatusColor, truncateText } from '../uti
+ import api from '../services/api';
+ import HelpTooltip from '../components/Common/HelpTooltip';
+ import { RECRUITMENT_TOOLTIPS } from '../utils/tooltips';
++import '../styles/thrs-recruitment-v9-premium.css';
+ 
+ import { uiAlert, uiConfirm } from '../utils/i18nDialogs';
+ 
+diff --git a/frontend/src/styles/thrs-recruitment-v9-premium.css b/frontend/src/styles/thrs-recruitment-v9-premium.css
+new file mode 100644
+index 0000000..dc91c00
+--- /dev/null
++++ b/frontend/src/styles/thrs-recruitment-v9-premium.css
+@@ -0,0 +1,814 @@
++/* THRS Recruitment Premium UI V9
++   UI-only visual layer for Recruitment.jsx.
++   No API, filtering, status, pagination, modal, or business-logic changes.
++*/
++
++.thrs-page-recruitment.thrs-recruitment-ux-v5 {
++  --rec-v9-navy: #0b2b4d;
++  --rec-v9-navy-2: #123f6c;
++  --rec-v9-gold: #c99b36;
++  --rec-v9-text: #102a43;
++  --rec-v9-muted: #6b7f95;
++  --rec-v9-border: #e5edf5;
++  --rec-v9-surface: #ffffff;
++  --rec-v9-soft: #f7faff;
++  --rec-v9-shadow: 0 12px 34px rgba(15, 39, 68, 0.08);
++  --rec-v9-shadow-sm: 0 5px 18px rgba(15, 39, 68, 0.06);
++  --rec-v9-radius-xl: 24px;
++  --rec-v9-radius-lg: 18px;
++  --rec-v9-radius-md: 14px;
++
++  max-width: 1440px;
++  margin: 0 auto;
++  padding: 26px 30px 52px;
++  color: var(--rec-v9-text);
++}
++
++/* ---------- Hero ---------- */
++.thrs-page-recruitment.thrs-recruitment-ux-v5 .thrs-rec-v7-hero {
++  position: relative;
++  min-height: 118px;
++  margin: 0 0 18px;
++  padding: 24px 28px;
++  border: 1px solid rgba(207, 221, 235, 0.92);
++  border-radius: var(--rec-v9-radius-xl);
++  background:
++    radial-gradient(circle at 90% 10%, rgba(201, 155, 54, 0.10), transparent 26%),
++    radial-gradient(circle at 8% 90%, rgba(37, 99, 235, 0.08), transparent 30%),
++    linear-gradient(135deg, #ffffff 0%, #fbfdff 100%);
++  box-shadow: var(--rec-v9-shadow);
++  overflow: hidden;
++}
++
++.thrs-page-recruitment.thrs-recruitment-ux-v5 .thrs-rec-v7-hero::after {
++  content: "";
++  position: absolute;
++  inset-inline-end: 20px;
++  bottom: 0;
++  width: 84px;
++  height: 3px;
++  border-radius: 999px 999px 0 0;
++  background: linear-gradient(90deg, var(--rec-v9-gold), #f0cf73);
++}
++
++.thrs-page-recruitment.thrs-recruitment-ux-v5 .thrs-rec-v7-hero-copy {
++  display: flex;
++  align-items: center;
++  gap: 18px;
++  min-width: 0;
++}
++
++.thrs-page-recruitment.thrs-recruitment-ux-v5 .thrs-rec-v7-hero-icon {
++  width: 54px;
++  height: 54px;
++  flex: 0 0 54px;
++  display: grid;
++  place-items: center;
++  color: #b98215;
++  border: 1px solid #f1dfb5;
++  border-radius: 17px;
++  background: linear-gradient(145deg, #fffdf7, #fff9ea);
++  box-shadow: 0 8px 20px rgba(174, 126, 25, 0.10);
++}
++
++.thrs-page-recruitment.thrs-recruitment-ux-v5 .thrs-rec-v7-hero-text .page-title {
++  margin: 0;
++  color: var(--rec-v9-text);
++  font-size: clamp(26px, 2.2vw, 36px);
++  line-height: 1.1;
++  letter-spacing: -0.03em;
++  font-weight: 800;
++}
++
++.thrs-page-recruitment.thrs-recruitment-ux-v5 .thrs-rec-v7-hero-text p {
++  margin: 8px 0 0;
++  color: var(--rec-v9-muted);
++  font-size: 14px;
++  font-weight: 550;
++}
++
++.thrs-page-recruitment.thrs-recruitment-ux-v5 .thrs-rec-v7-primary-action {
++  min-height: 44px;
++  padding: 0 18px;
++  border: 1px solid #0a2745;
++  border-radius: 13px;
++  background: linear-gradient(180deg, #123d68, #092947);
++  color: #fff;
++  font-size: 13px;
++  font-weight: 750;
++  box-shadow: 0 9px 20px rgba(9, 41, 71, 0.20);
++  transition: transform 160ms ease, box-shadow 160ms ease, filter 160ms ease;
++}
++
++.thrs-page-recruitment.thrs-recruitment-ux-v5 .thrs-rec-v7-primary-action:hover {
++  transform: translateY(-1px);
++  box-shadow: 0 12px 24px rgba(9, 41, 71, 0.24);
++  filter: brightness(1.03);
++}
++
++/* ---------- KPI cards ---------- */
++.thrs-page-recruitment.thrs-recruitment-ux-v5 .thrs-rec-v7-kpi-grid {
++  display: grid;
++  grid-template-columns: repeat(5, minmax(0, 1fr));
++  gap: 14px;
++  margin: 0 0 20px;
++}
++
++.thrs-page-recruitment.thrs-recruitment-ux-v5 .thrs-rec-v7-kpi-card {
++  min-height: 94px;
++  display: flex;
++  align-items: center;
++  gap: 13px;
++  padding: 16px 17px;
++  border: 1px solid var(--rec-v9-border);
++  border-radius: var(--rec-v9-radius-lg);
++  background: rgba(255, 255, 255, 0.96);
++  box-shadow: var(--rec-v9-shadow-sm);
++  overflow: hidden;
++  transition: transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease;
++}
++
++.thrs-page-recruitment.thrs-recruitment-ux-v5 .thrs-rec-v7-kpi-card:hover {
++  transform: translateY(-2px);
++  border-color: color-mix(in srgb, var(--stat-accent, #2563eb) 22%, #dfe7f1);
++  box-shadow: 0 10px 26px rgba(15, 39, 68, 0.09);
++}
++
++.thrs-page-recruitment.thrs-recruitment-ux-v5 .thrs-rec-v7-kpi-icon {
++  width: 42px;
++  height: 42px;
++  flex: 0 0 42px;
++  display: grid;
++  place-items: center;
++  border-radius: 13px;
++  color: var(--stat-accent, #2563eb);
++  background: color-mix(in srgb, var(--stat-accent, #2563eb) 10%, #fff);
++  border: 1px solid color-mix(in srgb, var(--stat-accent, #2563eb) 15%, #edf2f7);
++}
++
++.thrs-page-recruitment.thrs-recruitment-ux-v5 .thrs-rec-v7-kpi-body {
++  min-width: 0;
++}
++
++.thrs-page-recruitment.thrs-recruitment-ux-v5 .thrs-rec-v7-kpi-label {
++  margin-bottom: 2px;
++  color: #5f7288;
++  font-size: 11px;
++  line-height: 1.25;
++  font-weight: 700;
++}
++
++.thrs-page-recruitment.thrs-recruitment-ux-v5 .thrs-rec-v7-kpi-value {
++  color: var(--stat-accent, #2563eb);
++  font-size: 26px;
++  line-height: 1;
++  font-weight: 850;
++  letter-spacing: -0.035em;
++}
++
++.thrs-page-recruitment.thrs-recruitment-ux-v5 .thrs-rec-v7-kpi-hint {
++  margin-top: 5px;
++  color: #8b9bad;
++  font-size: 9px;
++  line-height: 1.25;
++  font-weight: 600;
++}
++
++/* ---------- Pipeline ---------- */
++.thrs-page-recruitment.thrs-recruitment-ux-v5 .thrs-rec-v7-pipeline-panel {
++  margin: 0 0 22px;
++  padding: 23px 24px 20px;
++  border: 1px solid var(--rec-v9-border);
++  border-radius: var(--rec-v9-radius-xl);
++  background:
++    radial-gradient(circle at 100% 0, rgba(201, 155, 54, 0.07), transparent 24%),
++    linear-gradient(180deg, #fff, #fcfdff);
++  box-shadow: var(--rec-v9-shadow);
++}
++
++.thrs-page-recruitment.thrs-recruitment-ux-v5 .thrs-rec-v7-pipeline-head {
++  display: flex;
++  align-items: flex-start;
++  justify-content: space-between;
++  gap: 22px;
++  margin-bottom: 16px;
++}
++
++.thrs-page-recruitment.thrs-recruitment-ux-v5 .thrs-rec-v7-pipeline-copy {
++  order: -1;
++  min-width: 0;
++}
++
++.thrs-page-recruitment.thrs-recruitment-ux-v5 .thrs-rec-v7-eyebrow {
++  color: #b98a25;
++  font-size: 10px;
++  font-weight: 800;
++  letter-spacing: 0.08em;
++  text-transform: uppercase;
++}
++
++.thrs-page-recruitment.thrs-recruitment-ux-v5 .thrs-rec-v7-pipeline-copy h2 {
++  margin: 5px 0 4px;
++  color: var(--rec-v9-text);
++  font-size: 20px;
++  line-height: 1.15;
++  font-weight: 800;
++  letter-spacing: -0.02em;
++}
++
++.thrs-page-recruitment.thrs-recruitment-ux-v5 .thrs-rec-v7-pipeline-copy p {
++  margin: 0;
++  color: #74869a;
++  font-size: 11px;
++  font-weight: 550;
++}
++
++.thrs-page-recruitment.thrs-recruitment-ux-v5 .thrs-rec-v7-all-stage {
++  min-width: 72px;
++  min-height: 64px;
++  padding: 9px 13px;
++  display: flex;
++  flex-direction: column;
++  align-items: flex-start;
++  justify-content: center;
++  border: 1px solid #eadfbf;
++  border-radius: 14px;
++  background: linear-gradient(150deg, #fffefb, #fffaf0);
++  color: #6d5a2d;
++  box-shadow: 0 7px 18px rgba(126, 95, 28, 0.08);
++}
++
++.thrs-page-recruitment.thrs-recruitment-ux-v5 .thrs-rec-v7-all-stage span {
++  font-size: 10px;
++  color: #8a7b5a;
++  font-weight: 700;
++}
++
++.thrs-page-recruitment.thrs-recruitment-ux-v5 .thrs-rec-v7-all-stage strong {
++  margin-top: 2px;
++  color: var(--rec-v9-text);
++  font-size: 22px;
++  line-height: 1;
++  font-weight: 850;
++}
++
++.thrs-page-recruitment.thrs-recruitment-ux-v5 .thrs-rec-v7-stage-flow {
++  display: grid;
++  grid-template-columns: repeat(5, minmax(0, 1fr));
++  gap: 10px;
++  align-items: stretch;
++  overflow: visible;
++}
++
++.thrs-page-recruitment.thrs-recruitment-ux-v5 .thrs-rec-v7-stage-connector {
++  display: none !important;
++}
++
++.thrs-page-recruitment.thrs-recruitment-ux-v5 .thrs-rec-v7-stage-card {
++  position: relative;
++  min-width: 0;
++  min-height: 74px;
++  padding: 11px 12px 10px;
++  display: grid;
++  grid-template-columns: 32px 1fr;
++  gap: 9px;
++  align-items: center;
++  text-align: start;
++  border: 1px solid #e7edf4;
++  border-radius: 14px;
++  background: #fff;
++  box-shadow: 0 4px 13px rgba(15, 39, 68, 0.045);
++  overflow: hidden;
++  transition: transform 150ms ease, border-color 150ms ease, box-shadow 150ms ease;
++}
++
++.thrs-page-recruitment.thrs-recruitment-ux-v5 .thrs-rec-v7-stage-card::before {
++  content: "";
++  position: absolute;
++  inset: 0 0 auto 0;
++  height: 4px;
++  background: var(--stage-color, #2563eb);
++}
++
++.thrs-page-recruitment.thrs-recruitment-ux-v5 .thrs-rec-v7-stage-card:hover,
++.thrs-page-recruitment.thrs-recruitment-ux-v5 .thrs-rec-v7-stage-card.is-active {
++  transform: translateY(-1px);
++  border-color: color-mix(in srgb, var(--stage-color, #2563eb) 35%, #dfe7ef);
++  box-shadow: 0 8px 18px color-mix(in srgb, var(--stage-color, #2563eb) 10%, transparent);
++}
++
++.thrs-page-recruitment.thrs-recruitment-ux-v5 .thrs-rec-v7-stage-top {
++  display: grid;
++  gap: 4px;
++  justify-items: center;
++}
++
++.thrs-page-recruitment.thrs-recruitment-ux-v5 .thrs-rec-v7-stage-number {
++  width: 19px;
++  height: 19px;
++  display: grid;
++  place-items: center;
++  border-radius: 999px;
++  background: color-mix(in srgb, var(--stage-color, #2563eb) 11%, #fff);
++  color: var(--stage-color, #2563eb);
++  font-size: 9px;
++  font-weight: 800;
++}
++
++.thrs-page-recruitment.thrs-recruitment-ux-v5 .thrs-rec-v7-stage-icon {
++  width: 27px;
++  height: 27px;
++  display: grid;
++  place-items: center;
++  border-radius: 9px;
++  color: var(--stage-color, #2563eb);
++  background: color-mix(in srgb, var(--stage-color, #2563eb) 8%, #fff);
++}
++
++.thrs-page-recruitment.thrs-recruitment-ux-v5 .thrs-rec-v7-stage-copy {
++  min-width: 0;
++  display: grid;
++  grid-template-columns: 1fr auto;
++  align-items: center;
++  column-gap: 8px;
++}
++
++.thrs-page-recruitment.thrs-recruitment-ux-v5 .thrs-rec-v7-stage-copy strong {
++  min-width: 0;
++  color: #34475b;
++  font-size: 10px;
++  line-height: 1.2;
++  font-weight: 750;
++}
++
++.thrs-page-recruitment.thrs-recruitment-ux-v5 .thrs-rec-v7-stage-copy b {
++  color: var(--stage-color, #2563eb);
++  font-size: 19px;
++  line-height: 1;
++  font-weight: 850;
++}
++
++.thrs-page-recruitment.thrs-recruitment-ux-v5 .thrs-rec-v7-stage-copy small {
++  grid-column: 1 / -1;
++  width: max-content;
++  margin-top: 4px;
++  padding: 2px 6px;
++  border-radius: 999px;
++  color: var(--stage-color, #2563eb);
++  background: color-mix(in srgb, var(--stage-color, #2563eb) 8%, #fff);
++  font-size: 8px;
++  font-weight: 700;
++}
++
++.thrs-page-recruitment.thrs-recruitment-ux-v5 .thrs-rec-v7-timeline {
++  display: grid;
++  grid-template-columns: repeat(10, minmax(0, 1fr));
++  gap: 0;
++  margin: 14px 4px 0;
++}
++
++.thrs-page-recruitment.thrs-recruitment-ux-v5 .thrs-rec-v7-timeline-step {
++  position: relative;
++  height: 12px;
++}
++
++.thrs-page-recruitment.thrs-recruitment-ux-v5 .thrs-rec-v7-timeline-line {
++  position: absolute;
++  top: 5px;
++  inset-inline: 0;
++  height: 3px;
++  background: color-mix(in srgb, var(--stage-color, #2563eb) 35%, #e8edf3);
++}
++
++.thrs-page-recruitment.thrs-recruitment-ux-v5 .thrs-rec-v7-timeline-dot {
++  position: absolute;
++  top: 2px;
++  inset-inline-start: 50%;
++  width: 9px;
++  height: 9px;
++  transform: translateX(-50%);
++  border: 2px solid #fff;
++  border-radius: 999px;
++  background: var(--stage-color, #2563eb);
++  box-shadow: 0 0 0 1px color-mix(in srgb, var(--stage-color, #2563eb) 24%, #d8e0e9);
++}
++
++.thrs-page-recruitment.thrs-recruitment-ux-v5 .thrs-rec-v7-active-focus {
++  margin-top: 14px;
++  padding: 9px 11px;
++  border: 1px solid color-mix(in srgb, var(--stage-color, #2563eb) 18%, #e7edf4);
++  border-radius: 11px;
++  background: color-mix(in srgb, var(--stage-color, #2563eb) 5%, #fff);
++}
++
++/* ---------- Tabs ---------- */
++.thrs-page-recruitment.thrs-recruitment-ux-v5 .thrs-recruitment-tabs.thrs-rec-v4-tabs {
++  display: grid !important;
++  grid-template-columns: 1fr 1fr;
++  gap: 4px !important;
++  margin: 0 0 22px !important;
++  padding: 4px !important;
++  border: 1px solid var(--rec-v9-border) !important;
++  border-radius: 14px !important;
++  background: #fff !important;
++  box-shadow: var(--rec-v9-shadow-sm);
++}
++
++.thrs-page-recruitment.thrs-recruitment-ux-v5 .thrs-recruitment-tabs.thrs-rec-v4-tabs button {
++  min-height: 38px;
++  padding: 8px 14px !important;
++  border: 0 !important;
++  border-radius: 10px !important;
++  background: transparent !important;
++  color: #728399 !important;
++  font-size: 12px !important;
++  font-weight: 700 !important;
++}
++
++.thrs-page-recruitment.thrs-recruitment-ux-v5 .thrs-recruitment-tabs.thrs-rec-v4-tabs button[style*="font-weight: 600"] {
++  background: linear-gradient(180deg, #153f6b, #0c2e52) !important;
++  color: #fff !important;
++  box-shadow: 0 6px 16px rgba(12, 46, 82, 0.17);
++}
++
++/* ---------- Filters ---------- */
++.thrs-page-recruitment.thrs-recruitment-ux-v5 .thrs-recruitment-filter-card {
++  margin-bottom: 20px !important;
++  border: 1px solid var(--rec-v9-border) !important;
++  border-radius: 20px !important;
++  background: #fff !important;
++  box-shadow: var(--rec-v9-shadow-sm) !important;
++}
++
++.thrs-page-recruitment.thrs-recruitment-ux-v5 .thrs-recruitment-filter-card > div {
++  display: grid;
++  grid-template-columns: minmax(0, 1fr) auto;
++  gap: 14px 16px;
++  padding: 18px !important;
++}
++
++.thrs-page-recruitment.thrs-recruitment-ux-v5 .thrs-rec-v6-filter-head {
++  grid-column: 2;
++  grid-row: 1;
++  margin: 0;
++  align-self: center;
++}
++
++.thrs-page-recruitment.thrs-recruitment-ux-v5 .thrs-rec-v6-filter-title,
++.thrs-page-recruitment.thrs-recruitment-ux-v5 .thrs-rec-v6-filter-count,
++.thrs-page-recruitment.thrs-recruitment-ux-v5 .thrs-rec-v6-filter-btn-ghost,
++.thrs-page-recruitment.thrs-recruitment-ux-v5 .thrs-recruitment-filter-note {
++  display: none !important;
++}
++
++.thrs-page-recruitment.thrs-recruitment-ux-v5 .thrs-rec-v6-filter-actions {
++  display: flex;
++  align-items: center;
++  gap: 8px;
++}
++
++.thrs-page-recruitment.thrs-recruitment-ux-v5 .thrs-rec-v6-filter-btn {
++  min-height: 38px;
++  padding: 0 12px;
++  border-radius: 11px;
++  font-size: 11px;
++  font-weight: 750;
++}
++
++.thrs-page-recruitment.thrs-recruitment-ux-v5 .thrs-rec-v6-filter-btn-solid {
++  border-color: #0b2b4d;
++  background: #0b2b4d;
++  color: #fff;
++}
++
++.thrs-page-recruitment.thrs-recruitment-ux-v5 .thrs-rec-v6-filter-btn-outline {
++  border-color: #d9e3ed;
++  background: #fff;
++  color: #304960;
++}
++
++.thrs-page-recruitment.thrs-recruitment-ux-v5 .thrs-rec-v6-search-field {
++  grid-column: 1;
++  grid-row: 1;
++  min-height: 40px;
++  margin: 0;
++  border: 1px solid #dce6f0;
++  border-radius: 12px;
++  background: #fbfdff;
++  box-shadow: inset 0 1px 2px rgba(18, 48, 78, 0.02);
++}
++
++.thrs-page-recruitment.thrs-recruitment-ux-v5 .thrs-rec-v6-search-field:focus-within {
++  border-color: #9bb8d4;
++  box-shadow: 0 0 0 3px rgba(23, 81, 134, 0.07);
++}
++
++.thrs-page-recruitment.thrs-recruitment-ux-v5 .thrs-rec-v6-search-field input {
++  color: #263e55;
++  font-size: 12px;
++}
++
++.thrs-page-recruitment.thrs-recruitment-ux-v5 .thrs-rec-v6-filter-grid {
++  grid-column: 1 / -1;
++  grid-row: 2;
++  display: grid;
++  grid-template-columns: 1fr 1fr 1fr 1.25fr 1fr;
++  gap: 10px;
++  margin: 0;
++}
++
++.thrs-page-recruitment.thrs-recruitment-ux-v5 .thrs-rec-v6-filter-field label {
++  display: block;
++  margin: 0 0 5px;
++  color: #718297;
++  font-size: 9px;
++  line-height: 1.2;
++  font-weight: 750;
++  letter-spacing: 0.02em;
++}
++
++.thrs-page-recruitment.thrs-recruitment-ux-v5 .thrs-rec-v6-filter-field select,
++.thrs-page-recruitment.thrs-recruitment-ux-v5 .thrs-rec-v6-filter-field input {
++  width: 100%;
++  min-height: 38px;
++  padding: 0 10px;
++  border: 1px solid #dce6f0;
++  border-radius: 10px;
++  background: #fff;
++  color: #334b61;
++  font-size: 11px;
++  outline: none;
++}
++
++.thrs-page-recruitment.thrs-recruitment-ux-v5 .thrs-rec-v6-date-range {
++  gap: 6px;
++}
++
++.thrs-page-recruitment.thrs-recruitment-ux-v5 .thrs-rec-v6-date-range span {
++  color: #91a0b1;
++  font-size: 9px;
++}
++
++/* ---------- Applicant table ---------- */
++.thrs-page-recruitment.thrs-recruitment-ux-v5 .thrs-rec-v6-app-table,
++.thrs-page-recruitment.thrs-recruitment-ux-v5 .thrs-rec-v5-jobs-card {
++  border: 1px solid var(--rec-v9-border) !important;
++  border-radius: 20px !important;
++  background: #fff !important;
++  box-shadow: var(--rec-v9-shadow-sm) !important;
++  overflow: hidden !important;
++}
++
++.thrs-page-recruitment.thrs-recruitment-ux-v5 .thrs-rec-v6-app-table > div,
++.thrs-page-recruitment.thrs-recruitment-ux-v5 .thrs-rec-v5-jobs-card > div {
++  padding: 0 !important;
++}
++
++.thrs-page-recruitment.thrs-recruitment-ux-v5 .thrs-rec-v5-table-head {
++  min-height: 70px;
++  margin: 0 !important;
++  padding: 16px 18px 12px;
++  display: flex;
++  align-items: center;
++  justify-content: space-between;
++  gap: 16px;
++  border-bottom: 1px solid #edf2f6;
++  background: linear-gradient(180deg, #fff, #fcfdff);
++}
++
++.thrs-page-recruitment.thrs-recruitment-ux-v5 .thrs-rec-v5-table-head .thrs-rec-v5-eyebrow {
++  display: none;
++}
++
++.thrs-page-recruitment.thrs-recruitment-ux-v5 .thrs-rec-v5-table-head h3 {
++  margin: 0;
++  color: var(--rec-v9-text);
++  font-size: 15px;
++  font-weight: 800;
++}
++
++.thrs-page-recruitment.thrs-recruitment-ux-v5 .thrs-rec-v5-table-head p {
++  margin: 0;
++  color: #7c8ea1;
++  font-size: 10px;
++  font-weight: 650;
++}
++
++.thrs-page-recruitment.thrs-recruitment-ux-v5 .thrs-rec-v8-table-shell {
++  overflow-x: auto;
++}
++
++.thrs-page-recruitment.thrs-recruitment-ux-v5 .modern-table-wrap {
++  border: 0;
++  border-radius: 0;
++  overflow-x: auto;
++}
++
++.thrs-page-recruitment.thrs-recruitment-ux-v5 .modern-table {
++  width: 100%;
++  border-collapse: separate;
++  border-spacing: 0;
++  table-layout: auto;
++}
++
++.thrs-page-recruitment.thrs-recruitment-ux-v5 .modern-table thead th {
++  height: 36px;
++  padding: 8px 10px;
++  border-bottom: 1px solid #e9eff5;
++  background: #f8fafc;
++  color: #53677c;
++  font-size: 9px;
++  font-weight: 800;
++  text-transform: uppercase;
++  letter-spacing: 0.035em;
++  white-space: nowrap;
++}
++
++.thrs-page-recruitment.thrs-recruitment-ux-v5 .modern-table tbody td {
++  min-height: 54px;
++  padding: 10px;
++  border-bottom: 1px solid #eef3f7;
++  color: #324a60;
++  font-size: 10px;
++  vertical-align: middle;
++}
++
++.thrs-page-recruitment.thrs-recruitment-ux-v5 .modern-table-row,
++.thrs-page-recruitment.thrs-recruitment-ux-v5 .modern-table-row.zebra {
++  background: #fff;
++  transition: background 130ms ease;
++}
++
++.thrs-page-recruitment.thrs-recruitment-ux-v5 .modern-table-row:hover,
++.thrs-page-recruitment.thrs-recruitment-ux-v5 .modern-table-row.zebra:hover {
++  background: #f8fbff;
++}
++
++.thrs-page-recruitment.thrs-recruitment-ux-v5 .modern-table tbody tr:last-child td {
++  border-bottom: 0;
++}
++
++.thrs-page-recruitment.thrs-recruitment-ux-v5 .modern-table button {
++  border-radius: 10px;
++}
++
++/* ---------- Pagination ---------- */
++.thrs-page-recruitment.thrs-recruitment-ux-v5 [class*="pagination"] button {
++  border-radius: 9px;
++}
++
++.thrs-page-recruitment.thrs-recruitment-ux-v5 .thrs-rec-v6-app-table [class*="pagination"] {
++  padding-inline: 16px;
++}
++
++/* ---------- RTL ---------- */
++[dir="rtl"] .thrs-page-recruitment.thrs-recruitment-ux-v5 .thrs-rec-v7-pipeline-copy {
++  text-align: right;
++}
++
++[dir="rtl"] .thrs-page-recruitment.thrs-recruitment-ux-v5 .thrs-rec-v7-timeline-dot {
++  transform: translateX(50%);
++}
++
++/* ---------- Responsive ---------- */
++@media (max-width: 1200px) {
++  .thrs-page-recruitment.thrs-recruitment-ux-v5 {
++    padding-inline: 22px;
++  }
++
++  .thrs-page-recruitment.thrs-recruitment-ux-v5 .thrs-rec-v7-kpi-grid {
++    grid-template-columns: repeat(3, minmax(0, 1fr));
++  }
++
++  .thrs-page-recruitment.thrs-recruitment-ux-v5 .thrs-rec-v7-stage-flow {
++    grid-template-columns: repeat(2, minmax(0, 1fr));
++  }
++
++  .thrs-page-recruitment.thrs-recruitment-ux-v5 .thrs-rec-v7-timeline {
++    display: none;
++  }
++
++  .thrs-page-recruitment.thrs-recruitment-ux-v5 .thrs-rec-v6-filter-grid {
++    grid-template-columns: repeat(3, minmax(0, 1fr));
++  }
++}
++
++@media (max-width: 860px) {
++  .thrs-page-recruitment.thrs-recruitment-ux-v5 {
++    padding: 18px 14px 38px;
++  }
++
++  .thrs-page-recruitment.thrs-recruitment-ux-v5 .thrs-rec-v7-hero {
++    min-height: auto;
++    padding: 20px;
++  }
++
++  .thrs-page-recruitment.thrs-recruitment-ux-v5 .thrs-rec-v7-kpi-grid {
++    grid-template-columns: repeat(2, minmax(0, 1fr));
++  }
++
++  .thrs-page-recruitment.thrs-recruitment-ux-v5 .thrs-rec-v7-pipeline-head {
++    align-items: center;
++  }
++
++  .thrs-page-recruitment.thrs-recruitment-ux-v5 .thrs-recruitment-filter-card > div {
++    grid-template-columns: 1fr;
++  }
++
++  .thrs-page-recruitment.thrs-recruitment-ux-v5 .thrs-rec-v6-filter-head,
++  .thrs-page-recruitment.thrs-recruitment-ux-v5 .thrs-rec-v6-search-field {
++    grid-column: 1;
++  }
++
++  .thrs-page-recruitment.thrs-recruitment-ux-v5 .thrs-rec-v6-search-field {
++    grid-row: 1;
++  }
++
++  .thrs-page-recruitment.thrs-recruitment-ux-v5 .thrs-rec-v6-filter-head {
++    grid-row: 2;
++  }
++
++  .thrs-page-recruitment.thrs-recruitment-ux-v5 .thrs-rec-v6-filter-grid {
++    grid-column: 1;
++    grid-row: 3;
++    grid-template-columns: repeat(2, minmax(0, 1fr));
++  }
++}
++
++@media (max-width: 560px) {
++  .thrs-page-recruitment.thrs-recruitment-ux-v5 .thrs-rec-v7-hero {
++    align-items: flex-start;
++    gap: 16px;
++  }
++
++  .thrs-page-recruitment.thrs-recruitment-ux-v5 .thrs-rec-v7-hero-copy {
++    align-items: flex-start;
++  }
++
++  .thrs-page-recruitment.thrs-recruitment-ux-v5 .thrs-rec-v7-hero-icon {
++    width: 46px;
++    height: 46px;
++    flex-basis: 46px;
++  }
++
++  .thrs-page-recruitment.thrs-recruitment-ux-v5 .thrs-rec-v7-primary-action {
++    width: 100%;
++  }
++
++  .thrs-page-recruitment.thrs-recruitment-ux-v5 .thrs-rec-v7-kpi-grid,
++  .thrs-page-recruitment.thrs-recruitment-ux-v5 .thrs-rec-v7-stage-flow,
++  .thrs-page-recruitment.thrs-recruitment-ux-v5 .thrs-rec-v6-filter-grid {
++    grid-template-columns: 1fr;
++  }
++
++  .thrs-page-recruitment.thrs-recruitment-ux-v5 .thrs-rec-v7-pipeline-head {
++    display: grid;
++    grid-template-columns: 1fr auto;
++  }
++
++  .thrs-page-recruitment.thrs-recruitment-ux-v5 .thrs-rec-v6-filter-actions {
++    width: 100%;
++  }
++
++  .thrs-page-recruitment.thrs-recruitment-ux-v5 .thrs-rec-v6-filter-btn {
++    flex: 1;
++  }
++}
++
++/* ---------- Dark theme ---------- */
++html[data-theme="dark"] .thrs-page-recruitment.thrs-recruitment-ux-v5 {
++  --rec-v9-text: #e9f2fb;
++  --rec-v9-muted: #98aabd;
++  --rec-v9-border: #263d55;
++  --rec-v9-surface: #102438;
++  --rec-v9-soft: #132a40;
++  --rec-v9-shadow: 0 14px 36px rgba(0, 0, 0, 0.22);
++  --rec-v9-shadow-sm: 0 7px 20px rgba(0, 0, 0, 0.18);
++}
++
++html[data-theme="dark"] .thrs-page-recruitment.thrs-recruitment-ux-v5 .thrs-rec-v7-hero,
++html[data-theme="dark"] .thrs-page-recruitment.thrs-recruitment-ux-v5 .thrs-rec-v7-pipeline-panel,
++html[data-theme="dark"] .thrs-page-recruitment.thrs-recruitment-ux-v5 .thrs-rec-v7-kpi-card,
++html[data-theme="dark"] .thrs-page-recruitment.thrs-recruitment-ux-v5 .thrs-recruitment-tabs.thrs-rec-v4-tabs,
++html[data-theme="dark"] .thrs-page-recruitment.thrs-recruitment-ux-v5 .thrs-recruitment-filter-card,
++html[data-theme="dark"] .thrs-page-recruitment.thrs-recruitment-ux-v5 .thrs-rec-v6-app-table,
++html[data-theme="dark"] .thrs-page-recruitment.thrs-recruitment-ux-v5 .thrs-rec-v5-jobs-card,
++html[data-theme="dark"] .thrs-page-recruitment.thrs-recruitment-ux-v5 .thrs-rec-v7-stage-card {
++  background: #102438 !important;
++  border-color: #263d55 !important;
++}
++
++html[data-theme="dark"] .thrs-page-recruitment.thrs-recruitment-ux-v5 .modern-table-row,
++html[data-theme="dark"] .thrs-page-recruitment.thrs-recruitment-ux-v5 .modern-table-row.zebra {
++  background: #102438;
++}
++
++html[data-theme="dark"] .thrs-page-recruitment.thrs-recruitment-ux-v5 .modern-table thead th {
++  background: #132a40;
++  color: #a9b9c9;
++}
++
++html[data-theme="dark"] .thrs-page-recruitment.thrs-recruitment-ux-v5 .modern-table tbody td,
++html[data-theme="dark"] .thrs-page-recruitment.thrs-recruitment-ux-v5 .thrs-rec-v7-stage-copy strong {
++  color: #d6e2ee;
++}
