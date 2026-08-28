@@ -1,0 +1,97 @@
+TASK: Apply the THRS Recruitment V10 Polish patch ON TOP OF the already-deployed Recruitment V9 UI on the existing THRS server checkout. Validate it and leave the changes local for human review. DO NOT commit and DO NOT push to the THRS GitHub repository.
+
+PATCH SOURCE
+- Patch repo: https://github.com/mohamedamouseo-a11y/THRS-Patchs.git
+- Patch file: THRS_RECRUITMENT_V10_POLISH_2026-08-28.patch
+- Patch commit: f35b0c421fb96c9b12eda31d076a80017867f3b5
+
+IMPORTANT PRECONDITION
+V9 must already be present locally. Before doing anything, verify:
+- frontend/src/pages/Recruitment.jsx contains:
+  import '../styles/thrs-recruitment-v9-premium.css';
+- frontend/src/styles/thrs-recruitment-v9-premium.css exists.
+If either is missing, STOP and report that V9 is not present. Do not improvise.
+
+SCOPE
+This is a very small UI-only polish patch. It must NOT change backend, APIs, database, routes, auth, recruitment business logic, status transitions, filters behavior, pagination behavior, candidate data, jobs behavior, Nginx config, SSL, DNS, ports, or other modules.
+
+Expected V10 changes only:
+1) frontend/src/pages/Recruitment.jsx — add one import:
+   import '../styles/thrs-recruitment-v10-polish.css';
+2) frontend/src/styles/thrs-recruitment-v10-polish.css — new scoped stylesheet.
+
+The V10 visual goals are exactly:
+- Make the 10-stage Recruitment Pipeline easier to read and less cramped.
+- Restore/show the Search & Filters heading/action area clearly.
+- Slightly improve applicant-table row height and typography for readability.
+- Normalize spacing between Pipeline, Tabs, Filters, and Applicant Table.
+- Do NOT redesign Hero or KPI cards.
+
+EXECUTION
+
+1) Locate the existing live THRS working tree. Prefer current workspace if it has:
+   frontend/package.json
+   frontend/src/pages/Recruitment.jsx
+   frontend/src/styles/thrs-recruitment-v9-premium.css
+If more than one valid live checkout is found, STOP and report paths instead of guessing.
+
+2) Capture pre-change state:
+   pwd
+   git rev-parse --show-toplevel
+   git rev-parse HEAD
+   git branch --show-current
+   git status --short
+   grep -n "thrs-recruitment-v9-premium.css" frontend/src/pages/Recruitment.jsx
+   git diff -- frontend/src/pages/Recruitment.jsx frontend/src/styles/thrs-recruitment-v9-premium.css frontend/src/styles/thrs-recruitment-v10-polish.css
+
+3) Create a timestamped backup BEFORE apply, including:
+   - frontend/src/pages/Recruitment.jsx
+   - frontend/src/styles/thrs-recruitment-v9-premium.css
+Store under the existing THRS backups directory if available, otherwise create a safe backup directory beside the project without modifying unrelated deployment configuration.
+
+4) Obtain the patch from THRS-Patchs without altering the THRS repo history. Then run from THRS repo root:
+   git apply --check /path/to/THRS_RECRUITMENT_V10_POLISH_2026-08-28.patch
+If check fails, STOP and return the exact error. Do NOT use --reject, --3way, force, manual fuzzy apply, reset, checkout, or clean.
+
+5) Apply exactly once:
+   git apply /path/to/THRS_RECRUITMENT_V10_POLISH_2026-08-28.patch
+
+6) Verify scope immediately:
+   git status --short
+   git diff -- frontend/src/pages/Recruitment.jsx frontend/src/styles/thrs-recruitment-v10-polish.css
+Confirm no unexpected file changed because of V10.
+
+7) Frontend validation:
+   cd frontend
+   npm run build
+The project package.json defines the build command as react-scripts build. If build fails because of V10, STOP and report. Do not edit unrelated files to make the build pass.
+
+8) Deploy/reload ONLY using the currently existing THRS deployment method already used by this installation. Do not alter Nginx configuration, PM2 configuration, ports, DNS, SSL, environment variables, or deployment architecture. If the existing deployment method cannot be identified safely, leave the successful build ready and report that deployment was not changed.
+
+9) Smoke validation after deployment/reload:
+- Confirm /recruitment returns HTTP 200.
+- Confirm root / returns HTTP 200.
+- Confirm built CSS contains `thrs-recruitment-v10-polish` or representative V10 selectors such as `--rec-v10-section-gap`.
+- Confirm V9 stylesheet still exists and remains imported before V10.
+
+10) FINAL SAFETY RULES
+- DO NOT commit.
+- DO NOT push.
+- DO NOT stage unrelated files.
+- DO NOT remove V9.
+- DO NOT modify THRS main GitHub repository.
+- Leave V9 + V10 local on the server for visual review.
+
+FINAL REPORT MUST INCLUDE
+- Exact THRS path.
+- Backup path.
+- V9 precondition result.
+- git apply --check result.
+- Changed files.
+- npm build result.
+- deployment/reload action actually taken.
+- HTTP smoke-test results.
+- git status --short after completion.
+- Explicit statement: `NO COMMIT / NO PUSH`.
+- End with exactly:
+FINAL_MARKER=THRS_RECRUITMENT_V10_POLISH_DEPLOYED_OK
