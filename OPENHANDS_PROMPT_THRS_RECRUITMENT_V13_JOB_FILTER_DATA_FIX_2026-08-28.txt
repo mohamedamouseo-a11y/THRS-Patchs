@@ -1,69 +1,70 @@
-THRS Recruitment V13 — Job Filter Data Fix (Regenerated against current V12 state)
+THRS Recruitment V13 — Job Filter Data Fix
 
-Goal:
-Apply ONLY the small V13 patch that fixes Recruitment > Job filter so it contains every real target position used by applications, not only titles from the Job table.
+Use ONLY the repaired V13 patch commit:
+f093dde84d5633bc471c4b3b793725a9a8f8759c
 
-PATCH REPOSITORY
+Patch repository:
 https://github.com/mohamedamouseo-a11y/THRS-Patchs.git
 
-PATCH FILE
+Patch artifact:
 THRS_RECRUITMENT_V13_JOB_FILTER_DATA_FIX_2026-08-28.patch
 
-REGENERATED PATCH COMMIT
-a0021927f607930fcaf7ecb0ad76d3035ce767d2
+Goal:
+Fix Recruitment > Job filter so it contains every real position used by applications, not only titles from the Job table.
 
-Important:
-The previous V13 patch revision failed `git apply --check` on the frontend jobTitleOptions hunk because of live V12 context drift. This revision was regenerated with broader context matching the current V12 Recruitment.jsx structure. Do NOT use the old patch commit 95cea2a9c450e0ca37773e02fb0bf25c72cba117.
+Expected behavior:
+- GET /recruitment/jobs continues returning the normal jobs array.
+- The same response additionally returns applicationPositions collected from distinct Application.targetPosition values.
+- Recruitment.jsx merges Job.title + applicationPositions + current selected position.
+- Values are trimmed, empty values removed, duplicates removed, and the final list sorted.
+- Existing targetPosition filtering behavior remains unchanged.
+- V12 visual composition remains unchanged.
 
-Expected behavior after patch:
-- GET /recruitment/jobs keeps returning the normal jobs array.
-- The response also returns applicationPositions from distinct Application.targetPosition values.
-- Recruitment.jsx merges Job.title + applicationPositions + the currently selected position.
-- Values are trimmed, empty values removed, duplicates removed, then sorted.
-- Existing filter behavior remains based on targetPosition.
-- No UI redesign and no V12 visual changes.
+IMPORTANT HISTORY:
+- Do NOT use older V13 commits 95cea2a9... or a0021927...
+- The repaired patch at f093dde84d5633bc471c4b3b793725a9a8f8759c has corrected unified-diff hunk counts.
+- Do NOT manually apply any hunk if checks fail.
 
-SAFE EXECUTION
+SAFE EXECUTION:
 1) Work in /var/www/tamiyouz_hr.
-2) Do NOT reset, checkout, overwrite, delete, stage, or modify unrelated local changes.
-3) Fetch the exact patch from THRS-Patchs commit a0021927f607930fcaf7ecb0ad76d3035ce767d2.
-4) Existing backup may be reused if it still reflects the unchanged pre-V13 state:
-   /var/www/tamiyouz_hr/backups/recruitment-v13-pre-20260828-162917/
-   Otherwise create a fresh timestamped backup of:
+2) Do not reset, checkout, clean, overwrite, or delete unrelated local changes.
+3) Fetch the exact patch from THRS-Patchs commit f093dde84d5633bc471c4b3b793725a9a8f8759c.
+4) Existing backup may be reused if still valid, otherwise create a timestamped backup of:
    - backend/src/controllers/recruitment.controller.js
    - frontend/src/pages/Recruitment.jsx
-5) Run from THRS root:
+5) Run BOTH:
    git apply --numstat /path/to/THRS_RECRUITMENT_V13_JOB_FILTER_DATA_FIX_2026-08-28.patch
    git apply --check /path/to/THRS_RECRUITMENT_V13_JOB_FILTER_DATA_FIX_2026-08-28.patch
-6) If git apply --check fails: STOP. DO NOT manually apply, edit, use --3way, --reject, or fuzzy application. Return the exact failure and current source context around the failing hunk.
-7) If check passes, apply exactly once:
+6) Both must pass. If either fails: STOP and return exact error. Do NOT use --3way, --reject, or manual application.
+7) Apply exactly once:
    git apply /path/to/THRS_RECRUITMENT_V13_JOB_FILTER_DATA_FIX_2026-08-28.patch
-8) Verify only these task files changed:
+8) Verify only these source files changed for V13:
    - backend/src/controllers/recruitment.controller.js
    - frontend/src/pages/Recruitment.jsx
-9) Build frontend using the project's existing production build command.
-10) Restart the existing PM2 process tamiyouz-hr because the backend controller changed.
-11) Do not change Nginx, DNS, SSL, ports, Prisma schema, migrations, database data, auth, routes, or deployment architecture.
+9) Build frontend with the existing production build command.
+10) Restart the existing PM2 process tamiyouz-hr because backend controller code changes.
+11) Do not change Prisma schema, migrations, DB data, Nginx config, DNS, SSL, ports, auth, routes, or unrelated files.
 12) Smoke test:
    - https://hr.tamiyouzplaform.com/recruitment => HTTP 200
    - https://hr.tamiyouzplaform.com/ => HTTP 200
-13) Validate the API response contains applicationPositions.
-14) Validate the Job filter includes real applicant-only titles previously missing, such as any titles visible in applicant rows but absent from Job records.
-15) Select at least one newly surfaced title and confirm the existing targetPosition filter returns matching applicants.
-16) Do NOT commit and do NOT push production source changes back to THRS.
+13) Validate /recruitment/jobs response contains both jobs and applicationPositions.
+14) Validate the Job filter now includes positions that existed only in Application.targetPosition, including examples visible in applicant rows where present.
+15) Select at least one newly surfaced position and confirm filtering still uses targetPosition and returns matching applicants.
+16) Do NOT commit. Do NOT push. Leave production changes local for review.
 
-Required final report:
-- patch commit used
-- backup path
-- git apply --numstat result
-- git apply --check result
+Required report:
+- patch commit actually used
+- git apply --numstat output
+- git apply --check output
 - changed files
 - frontend build result
 - PM2 restart/status
 - HTTP smoke results
 - evidence applicationPositions is returned and consumed
-- evidence previously missing titles now appear and filter correctly
-- final git status --short for the two task files
-- confirmation no DB/schema/Nginx/DNS/SSL/auth/routes changes were made
+- evidence formerly missing titles now appear in dropdown
+- evidence selecting one works
+- backup path
+- final git status --short for the two V13 files
+- confirmation no DB/schema/Nginx/DNS/SSL changes
 
 FINAL_MARKER=THRS_RECRUITMENT_V13_JOB_FILTER_DATA_FIX_DEPLOYED_OK
