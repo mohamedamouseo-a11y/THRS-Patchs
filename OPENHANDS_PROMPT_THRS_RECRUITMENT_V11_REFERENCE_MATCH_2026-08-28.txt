@@ -1,0 +1,123 @@
+TASK: Apply THRS Recruitment V11 to the EXISTING live THRS deployment. V11 is NOT a generic polish. It is specifically designed to make the Recruitment page visually match the approved reference design "Tamiyouz HR Recruitment Dashboard.png" as closely as possible while preserving existing functionality.
+
+PATCH SOURCE
+- Patch repo: https://github.com/mohamedamouseo-a11y/THRS-Patchs.git
+- Patch file: THRS_RECRUITMENT_V11_REFERENCE_MATCH_2026-08-28.patch
+- Corrected patch commit: 0ca5b193736bd13ef853e2141382683f712725de
+
+EXPECTED CURRENT SERVER STATE
+V9 and V10 are already deployed locally. Verify BEFORE doing anything:
+1) frontend/src/pages/Recruitment.jsx contains BOTH:
+   import '../styles/thrs-recruitment-v9-premium.css';
+   import '../styles/thrs-recruitment-v10-polish.css';
+2) These files exist:
+   frontend/src/styles/thrs-recruitment-v9-premium.css
+   frontend/src/styles/thrs-recruitment-v10-polish.css
+If V9 or V10 is missing, STOP. Do not improvise.
+
+VISUAL TARGET — DO NOT REINTERPRET
+The required layout is the approved Recruitment reference design:
+- Large clean white Recruitment hero card with gold users icon, title/subtitle, navy Add Position button.
+- Exactly 5 KPI cards in one row on desktop.
+- Large white "Recruitment Pipeline" card.
+- Pipeline must visually read as TWO ROWS OF FIVE stages.
+- Each stage is a clean white card with a colored icon, stage name and large colored count.
+- Remove the tiny stage-number pills and Candidate micro-labels from the visible design.
+- Colored progress line/dot below each stage.
+- Applicants / Jobs segmented tab bar below the pipeline.
+- Filters card must match the reference composition: search field on the first row, Export + Advanced Filters on the right, 5 primary filter groups below, Clear all filters as a small link-style action.
+- Do not show the Search & Filters heading in the final desktop composition.
+- Applicants table must visually match the reference: white card, Applicants heading, compact subtitle, clean single-line rows, no internal vertical scroll box.
+- On the visible desktop table hide the utility columns Level, Rating and Task, leaving Applicant / Job-Department / Status / Source / Applied Date / Action.
+- Keep the real underlying data and functionality intact; those hidden fields remain in candidate details and advanced filtering.
+- Row action should visually resemble the reference eye + menu treatment while the existing details action remains functional.
+- Navy, white and restrained gold accents. Soft light blue-gray page background. Rounded 16–22px cards. Subtle shadows only.
+- The difference from V10 MUST be obvious immediately. This is a reference-match pass, not a micro-polish.
+
+HARD SAFETY RULES
+- UI/UX only.
+- NO backend changes.
+- NO API changes.
+- NO database/schema/data changes.
+- NO authentication or authorization changes.
+- NO recruitment workflow/business-logic changes.
+- NO Nginx config changes, DNS, SSL, ports, environment or PM2 config changes.
+- DO NOT commit.
+- DO NOT push.
+- DO NOT stage unrelated files.
+- DO NOT use git reset --hard, git clean, force checkout, --3way, --reject, or fuzzy/manual application.
+- IMPORTANT: If `git apply --check` fails for ANY reason, STOP and report the exact error. DO NOT manually reproduce the patch. The previous V10 manual-apply behavior must NOT be repeated.
+
+EXECUTION
+1) Locate the existing live THRS working tree. Expected production root is /var/www/tamiyouz_hr if it is still the active checkout. Verify using:
+   pwd
+   git rev-parse --show-toplevel
+   git rev-parse HEAD
+   git branch --show-current
+   git status --short
+
+2) Capture current Recruitment state:
+   grep -n "thrs-recruitment-v9-premium\|thrs-recruitment-v10-polish\|thrs-recruitment-v11-reference-match" frontend/src/pages/Recruitment.jsx || true
+   git diff -- frontend/src/pages/Recruitment.jsx frontend/src/styles/thrs-recruitment-v9-premium.css frontend/src/styles/thrs-recruitment-v10-polish.css frontend/src/styles/thrs-recruitment-v11-reference-match.css
+
+3) Create a timestamped backup BEFORE apply containing at least:
+   frontend/src/pages/Recruitment.jsx
+   frontend/src/styles/thrs-recruitment-v9-premium.css
+   frontend/src/styles/thrs-recruitment-v10-polish.css
+Use the existing /var/www/tamiyouz_hr/backups convention if available.
+
+4) Obtain the exact patch from THRS-Patchs commit 0ca5b193736bd13ef853e2141382683f712725de.
+
+5) From THRS repo root run BOTH parser and applicability checks:
+   git apply --numstat /path/to/THRS_RECRUITMENT_V11_REFERENCE_MATCH_2026-08-28.patch
+   git apply --check /path/to/THRS_RECRUITMENT_V11_REFERENCE_MATCH_2026-08-28.patch
+Both must succeed. If either fails: STOP. NO MANUAL APPLY.
+
+6) Apply exactly once:
+   git apply /path/to/THRS_RECRUITMENT_V11_REFERENCE_MATCH_2026-08-28.patch
+
+7) Verify V11 scope:
+   git status --short
+   git diff -- frontend/src/pages/Recruitment.jsx frontend/src/styles/thrs-recruitment-v11-reference-match.css
+Expected V11 changes are only Recruitment.jsx copy/import adjustments plus the new V11 scoped stylesheet. Existing V9/V10 local files remain.
+
+8) Build:
+   cd frontend
+   npm run build
+Build must pass. Do not edit unrelated files to make it pass.
+
+9) Deploy/reload ONLY using the installation's EXISTING deployment method. Do not change deployment architecture or config. Reload only what is already normally reloaded by this installation.
+
+10) Smoke test:
+   - https://hr.tamiyouzplaform.com/recruitment => HTTP 200
+   - https://hr.tamiyouzplaform.com/ => HTTP 200
+   - Built CSS contains a V11 selector such as `--v11-navy` and `thrs-rec-v7-stage-flow`.
+   - Recruitment.jsx imports V9 then V10 then V11 in that order.
+
+11) VISUAL SANITY CHECK if browser/screenshot capability exists:
+   Confirm desktop visibly has:
+   - 5 KPIs across
+   - pipeline 5 + 5
+   - simple Recruitment Pipeline heading
+   - search + Export + Advanced Filters first row
+   - no visible Search & Filters title
+   - table without Level / Rating / Task columns
+   - no internal table vertical scrollbar
+If any of these fail, report exactly which selector/layout failed. Do not invent extra redesign changes.
+
+FINAL REPORT MUST INCLUDE
+- THRS path
+- backup path
+- precondition result
+- `git apply --numstat` result
+- `git apply --check` result
+- changed files
+- npm build result
+- deploy/reload action actually taken
+- HTTP results
+- visual sanity result if available
+- final `git status --short`
+- explicit: NO COMMIT / NO PUSH
+
+End exactly with:
+FINAL_MARKER=THRS_RECRUITMENT_V11_REFERENCE_MATCH_DEPLOYED_OK
