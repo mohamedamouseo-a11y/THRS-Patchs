@@ -1,0 +1,59 @@
+diff --git a/backend/prisma/schema.prisma b/backend/prisma/schema.prisma
+--- a/backend/prisma/schema.prisma
++++ b/backend/prisma/schema.prisma
+@@ -2,22 +2,49 @@
+ // Audit & Notifications
+ // ============================================
+ 
+ model AuditLog {
+-  id     String @id @default(uuid())
+-  userId String
+-  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
++  id     String  @id @default(uuid())
++  userId String?
++  user   User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
+ 
+-  action   String // LOGIN, CREATE_EMPLOYEE, etc.
+-  entity   String? // EMPLOYEE, LEAVE, etc.
++  // Immutable actor snapshot. Kept even if the user is later removed/renamed.
++  actorName  String?
++  actorEmail String?
++  actorRole  String?
++
++  // Normalized central-audit taxonomy.
++  action   String
++  module   String  @default("SYSTEM")
++  entity   String?
+   entityId String?
+-  changes  Json?
++  summary  String?
++
++  // Phase 1 stores the sanitized request under changes.
++  // beforeState/afterState are reserved for the later Undo Engine.
++  changes     Json?
++  beforeState Json?
++  afterState  Json?
++  metadata    Json?
++
++  requestId  String?
++  method     String?
++  route      String?
++  outcome    String  @default("SUCCESS")
++  statusCode Int?
++  source     String  @default("WEB")
++  reversible Boolean @default(false)
+ 
+   ipAddress String?
+   userAgent String?
+ 
+   createdAt DateTime @default(now())
+ 
++  @@index([createdAt])
++  @@index([userId, createdAt])
++  @@index([module, action, createdAt])
++  @@index([entity, entityId])
++  @@index([requestId])
+   @@map("audit_logs")
+ }
+ 
+ enum NotificationType {
