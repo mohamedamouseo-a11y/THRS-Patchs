@@ -1,0 +1,719 @@
+diff --git a/backend/prisma/schema.prisma b/backend/prisma/schema.prisma
+--- a/backend/prisma/schema.prisma
++++ b/backend/prisma/schema.prisma
+@@ -1300,4 +1300,43 @@
+   @@map("audit_logs")
+ }
+ 
++model DeletionRecord {
++  id          String  @id @default(uuid())
++  module      String  @default("SYSTEM")
++  entityType  String
++  entityId    String
++  entityLabel String?
++  status      String  @default("PENDING_REVIEW")
++  isActive    Boolean @default(true)
++  reason      String
++
++  requestedById    String?
++  requestedByName  String?
++  requestedByEmail String?
++  requestedByRole  String?
++  requestedAt      DateTime @default(now())
++
++  reviewedById    String?
++  reviewedByName  String?
++  reviewedByEmail String?
++  reviewedByRole  String?
++  reviewedAt      DateTime?
++  reviewNote      String?
++
++  confirmedAt DateTime?
++  restoredAt  DateTime?
++  snapshot    Json?
++  metadata    Json?
++
++  createdAt DateTime @default(now())
++  updatedAt DateTime @updatedAt
++
++  @@index([status, createdAt])
++  @@index([module, createdAt])
++  @@index([entityType, entityId])
++  @@index([isActive, entityType])
++  @@index([requestedById, createdAt])
++  @@map("deletion_records")
++}
++
+ enum NotificationType {
+diff --git a/backend/prisma/migrations/20260829000200_central_deletion_governance/migration.sql b/backend/prisma/migrations/20260829000200_central_deletion_governance/migration.sql
+new file mode 100644
+--- /dev/null
++++ b/backend/prisma/migrations/20260829000200_central_deletion_governance/migration.sql
+@@ -0,0 +1,42 @@
++-- THRS Central Soft Delete & Deletion Governance — Phase 2
++-- Adds the central recycle-bin ledger. Business records remain physically intact.
++
++CREATE TABLE "deletion_records" (
++  "id" TEXT NOT NULL,
++  "module" TEXT NOT NULL DEFAULT 'SYSTEM',
++  "entityType" TEXT NOT NULL,
++  "entityId" TEXT NOT NULL,
++  "entityLabel" TEXT,
++  "status" TEXT NOT NULL DEFAULT 'PENDING_REVIEW',
++  "isActive" BOOLEAN NOT NULL DEFAULT true,
++  "reason" TEXT NOT NULL,
++  "requestedById" TEXT,
++  "requestedByName" TEXT,
++  "requestedByEmail" TEXT,
++  "requestedByRole" TEXT,
++  "requestedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
++  "reviewedById" TEXT,
++  "reviewedByName" TEXT,
++  "reviewedByEmail" TEXT,
++  "reviewedByRole" TEXT,
++  "reviewedAt" TIMESTAMP(3),
++  "reviewNote" TEXT,
++  "confirmedAt" TIMESTAMP(3),
++  "restoredAt" TIMESTAMP(3),
++  "snapshot" JSONB,
++  "metadata" JSONB,
++  "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
++  "updatedAt" TIMESTAMP(3) NOT NULL,
++  CONSTRAINT "deletion_records_pkey" PRIMARY KEY ("id")
++);
++
++CREATE INDEX "deletion_records_status_createdAt_idx"
++  ON "deletion_records"("status", "createdAt");
++CREATE INDEX "deletion_records_module_createdAt_idx"
++  ON "deletion_records"("module", "createdAt");
++CREATE INDEX "deletion_records_entityType_entityId_idx"
++  ON "deletion_records"("entityType", "entityId");
++CREATE INDEX "deletion_records_isActive_entityType_idx"
++  ON "deletion_records"("isActive", "entityType");
++CREATE INDEX "deletion_records_requestedById_createdAt_idx"
++  ON "deletion_records"("requestedById", "createdAt");
+diff --git a/backend/src/services/deletion.service.js b/backend/src/services/deletion.service.js
+new file mode 100644
+--- /dev/null
++++ b/backend/src/services/deletion.service.js
+@@ -0,0 +1,243 @@
++'use strict';
++
++const prisma = require('../config/database');
++const {
++  actorSnapshot,
++  sanitizeForAudit,
++  recordAuditEvent,
++  clientIp,
++} = require('./audit.service');
++
++const STATUS_PENDING = 'PENDING_REVIEW';
++const STATUS_CONFIRMED = 'CONFIRMED';
++const STATUS_RESTORED = 'RESTORED';
++
++function makeHttpError(statusCode, message) {
++  const error = new Error(message);
++  error.statusCode = statusCode;
++  return error;
++}
++
++function cleanReason(value, fallback) {
++  const text = String(value || '').trim();
++  return (text || fallback || 'Deletion requested from THRS').slice(0, 1000);
++}
++
++const ENTITY_ADAPTERS = {
++  JOB: {
++    module: 'RECRUITMENT',
++    async load(id) {
++      return prisma.job.findUnique({
++        where: { id: String(id) },
++        select: {
++          id: true, title: true, status: true, departmentId: true,
++          positionCode: true, postedAt: true, createdAt: true, updatedAt: true,
++        },
++      });
++    },
++    label(record) {
++      return record?.title || `Job ${record?.id || ''}`.trim();
++    },
++  },
++  APPLICATION: {
++    module: 'RECRUITMENT',
++    async load(id) {
++      return prisma.application.findUnique({
++        where: { id: String(id) },
++        select: {
++          id: true, firstName: true, lastName: true, email: true, phone: true,
++          targetPosition: true, departmentName: true, status: true, source: true,
++          appliedAt: true, createdAt: true, updatedAt: true,
++        },
++      });
++    },
++    label(record) {
++      const name = [record?.firstName, record?.lastName].filter(Boolean).join(' ').trim();
++      return name || record?.email || record?.phone || `Application ${record?.id || ''}`.trim();
++    },
++  },
++};
++
++function normalizeEntityType(value) {
++  return String(value || '').trim().toUpperCase();
++}
++
++function getAdapter(entityType) {
++  const normalized = normalizeEntityType(entityType);
++  const adapter = ENTITY_ADAPTERS[normalized];
++  if (!adapter) throw makeHttpError(400, `Soft delete is not enabled for ${normalized || 'this entity'} yet.`);
++  return { normalized, adapter };
++}
++
++async function getActiveDeletionIds(entityType) {
++  const normalized = normalizeEntityType(entityType);
++  if (!normalized) return [];
++  const rows = await prisma.deletionRecord.findMany({
++    where: { entityType: normalized, isActive: true },
++    select: { entityId: true },
++  });
++  return rows.map((row) => row.entityId);
++}
++
++async function isEntitySoftDeleted(entityType, entityId) {
++  const normalized = normalizeEntityType(entityType);
++  if (!normalized || entityId === null || entityId === undefined) return false;
++  const row = await prisma.deletionRecord.findFirst({
++    where: { entityType: normalized, entityId: String(entityId), isActive: true },
++    select: { id: true },
++  });
++  return Boolean(row);
++}
++
++async function assertEntityVisible(entityType, entityId) {
++  if (await isEntitySoftDeleted(entityType, entityId)) {
++    throw makeHttpError(404, 'Record not found');
++  }
++}
++
++async function requestSoftDelete(req, entityType, entityId, reason) {
++  const { normalized, adapter } = getAdapter(entityType);
++  const normalizedId = String(entityId || '').trim();
++  if (!normalizedId) throw makeHttpError(400, 'Entity ID is required.');
++
++  const existing = await prisma.deletionRecord.findFirst({
++    where: { entityType: normalized, entityId: normalizedId, isActive: true },
++    orderBy: { createdAt: 'desc' },
++  });
++  if (existing) return { record: existing, alreadyDeleted: true };
++
++  const sourceRecord = await adapter.load(normalizedId);
++  if (!sourceRecord) throw makeHttpError(404, 'Record not found');
++
++  const actor = actorSnapshot(req);
++  const snapshot = sanitizeForAudit(sourceRecord);
++  // The domain-level SOFT_DELETE event below is richer than the generic HTTP audit event.
++  req.skipCentralAudit = true;
++  const resolvedReason = cleanReason(reason, `Requested from ${adapter.module}`);
++
++  const record = await prisma.deletionRecord.create({
++    data: {
++      module: adapter.module,
++      entityType: normalized,
++      entityId: normalizedId,
++      entityLabel: adapter.label(sourceRecord),
++      status: STATUS_PENDING,
++      isActive: true,
++      reason: resolvedReason,
++      requestedById: actor.userId || null,
++      requestedByName: actor.actorName || null,
++      requestedByEmail: actor.actorEmail || null,
++      requestedByRole: actor.actorRole || null,
++      snapshot,
++      metadata: {
++        source: actor.source || 'WEB',
++        route: req.originalUrl || null,
++        requestId: req.auditRequestId || null,
++      },
++    },
++  });
++
++  await recordAuditEvent({
++    ...actor,
++    action: 'SOFT_DELETE',
++    module: adapter.module,
++    entity: normalized,
++    entityId: normalizedId,
++    summary: `Soft deleted ${normalized} pending Super Admin review`,
++    beforeState: snapshot,
++    afterState: { deletionRecordId: record.id, status: record.status, isActive: true },
++    metadata: { deletionRecordId: record.id, reason: resolvedReason },
++    requestId: req.auditRequestId || null,
++    method: req.method || 'DELETE',
++    route: req.originalUrl || null,
++    outcome: 'SUCCESS',
++    statusCode: 202,
++    source: actor.source || 'WEB',
++    reversible: true,
++    ipAddress: clientIp(req),
++    userAgent: req.get?.('user-agent') || null,
++  });
++
++  return { record, alreadyDeleted: false };
++}
++
++async function reviewDeletion(req, deletionId, decision, note) {
++  const record = await prisma.deletionRecord.findUnique({ where: { id: String(deletionId) } });
++  if (!record) throw makeHttpError(404, 'Deletion record not found');
++
++  const normalizedDecision = String(decision || '').trim().toUpperCase();
++  if (!['CONFIRM', 'RESTORE'].includes(normalizedDecision)) {
++    throw makeHttpError(400, 'Invalid deletion review decision');
++  }
++  if (!record.isActive && normalizedDecision === 'RESTORE') return record;
++  if (record.status === STATUS_CONFIRMED && normalizedDecision === 'CONFIRM') return record;
++
++  const actor = actorSnapshot(req);
++  const now = new Date();
++  const isRestore = normalizedDecision === 'RESTORE';
++
++  const updated = await prisma.deletionRecord.update({
++    where: { id: record.id },
++    data: {
++      status: isRestore ? STATUS_RESTORED : STATUS_CONFIRMED,
++      isActive: !isRestore,
++      reviewedById: actor.userId || null,
++      reviewedByName: actor.actorName || null,
++      reviewedByEmail: actor.actorEmail || null,
++      reviewedByRole: actor.actorRole || null,
++      reviewedAt: now,
++      reviewNote: String(note || '').trim().slice(0, 1000) || null,
++      restoredAt: isRestore ? now : record.restoredAt,
++      confirmedAt: isRestore ? record.confirmedAt : now,
++    },
++  });
++
++  await recordAuditEvent({
++    ...actor,
++    action: isRestore ? 'RESTORE' : 'CONFIRM_DELETE',
++    module: record.module,
++    entity: record.entityType,
++    entityId: record.entityId,
++    summary: isRestore
++      ? `Restored ${record.entityType} from Recycle Bin`
++      : `Confirmed soft deletion of ${record.entityType}`,
++    beforeState: {
++      deletionRecordId: record.id,
++      status: record.status,
++      isActive: record.isActive,
++      snapshot: record.snapshot,
++    },
++    afterState: {
++      deletionRecordId: updated.id,
++      status: updated.status,
++      isActive: updated.isActive,
++    },
++    metadata: {
++      reviewNote: updated.reviewNote,
++      originalRequester: record.requestedByEmail || record.requestedByName || null,
++    },
++    requestId: req.auditRequestId || null,
++    method: req.method || 'POST',
++    route: req.originalUrl || null,
++    outcome: 'SUCCESS',
++    statusCode: 200,
++    source: actor.source || 'WEB',
++    reversible: !isRestore,
++    ipAddress: clientIp(req),
++    userAgent: req.get?.('user-agent') || null,
++  });
++
++  return updated;
++}
++
++module.exports = {
++  STATUS_PENDING,
++  STATUS_CONFIRMED,
++  STATUS_RESTORED,
++  ENTITY_ADAPTERS,
++  getActiveDeletionIds,
++  isEntitySoftDeleted,
++  assertEntityVisible,
++  requestSoftDelete,
++  reviewDeletion,
++};
+diff --git a/backend/src/controllers/deletion.controller.js b/backend/src/controllers/deletion.controller.js
+new file mode 100644
+--- /dev/null
++++ b/backend/src/controllers/deletion.controller.js
+@@ -0,0 +1,133 @@
++'use strict';
++
++const prisma = require('../config/database');
++const { reviewDeletion } = require('../services/deletion.service');
++
++const MAX_PAGE_SIZE = 100;
++
++function clean(value) {
++  const text = String(value || '').trim();
++  return text || null;
++}
++
++function parseDate(value, endOfDay = false) {
++  if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(String(value))) return null;
++  const date = new Date(`${value}${endOfDay ? 'T23:59:59.999' : 'T00:00:00.000'}`);
++  return Number.isNaN(date.getTime()) ? null : date;
++}
++
++function buildWhere(query) {
++  const where = {};
++  const status = clean(query.status);
++  const moduleName = clean(query.module);
++  const entityType = clean(query.entityType);
++  const search = clean(query.search);
++
++  if (status) where.status = status;
++  if (moduleName) where.module = moduleName;
++  if (entityType) where.entityType = entityType;
++  if (query.active === 'true') where.isActive = true;
++  if (query.active === 'false') where.isActive = false;
++
++  if (search) {
++    where.OR = [
++      { entityLabel: { contains: search, mode: 'insensitive' } },
++      { entityType: { contains: search, mode: 'insensitive' } },
++      { entityId: { contains: search, mode: 'insensitive' } },
++      { module: { contains: search, mode: 'insensitive' } },
++      { requestedByName: { contains: search, mode: 'insensitive' } },
++      { requestedByEmail: { contains: search, mode: 'insensitive' } },
++      { reason: { contains: search, mode: 'insensitive' } },
++    ];
++  }
++
++  const from = parseDate(query.from);
++  const to = parseDate(query.to, true);
++  if (from || to) {
++    where.createdAt = {};
++    if (from) where.createdAt.gte = from;
++    if (to) where.createdAt.lte = to;
++  }
++  return where;
++}
++
++async function listRecords(req, res) {
++  try {
++    const page = Math.max(1, Number.parseInt(req.query.page, 10) || 1);
++    const pageSize = Math.min(MAX_PAGE_SIZE, Math.max(10, Number.parseInt(req.query.pageSize, 10) || 25));
++    const where = buildWhere(req.query);
++
++    const [total, records] = await Promise.all([
++      prisma.deletionRecord.count({ where }),
++      prisma.deletionRecord.findMany({
++        where,
++        orderBy: { createdAt: 'desc' },
++        skip: (page - 1) * pageSize,
++        take: pageSize,
++      }),
++    ]);
++
++    return res.json({
++      success: true,
++      data: {
++        records,
++        pagination: {
++          page,
++          pageSize,
++          total,
++          pages: Math.max(1, Math.ceil(total / pageSize)),
++        },
++      },
++    });
++  } catch (error) {
++    console.error('Deletion Center list error:', error);
++    return res.status(500).json({ success: false, message: 'Failed to load deletion records' });
++  }
++}
++
++async function getSummary(req, res) {
++  try {
++    const [pending, confirmed, restored, active, total] = await Promise.all([
++      prisma.deletionRecord.count({ where: { status: 'PENDING_REVIEW' } }),
++      prisma.deletionRecord.count({ where: { status: 'CONFIRMED' } }),
++      prisma.deletionRecord.count({ where: { status: 'RESTORED' } }),
++      prisma.deletionRecord.count({ where: { isActive: true } }),
++      prisma.deletionRecord.count(),
++    ]);
++    return res.json({ success: true, data: { pending, confirmed, restored, active, total } });
++  } catch (error) {
++    console.error('Deletion Center summary error:', error);
++    return res.status(500).json({ success: false, message: 'Failed to load deletion summary' });
++  }
++}
++
++async function getRecord(req, res) {
++  try {
++    const record = await prisma.deletionRecord.findUnique({ where: { id: req.params.id } });
++    if (!record) return res.status(404).json({ success: false, message: 'Deletion record not found' });
++    return res.json({ success: true, data: record });
++  } catch (error) {
++    console.error('Deletion Center detail error:', error);
++    return res.status(500).json({ success: false, message: 'Failed to load deletion record' });
++  }
++}
++
++async function confirmRecord(req, res) {
++  try {
++    const record = await reviewDeletion(req, req.params.id, 'CONFIRM', req.body?.note);
++    return res.json({ success: true, message: 'Soft deletion confirmed by Super Admin.', data: record });
++  } catch (error) {
++    return res.status(error.statusCode || 500).json({ success: false, message: error.message || 'Failed to confirm deletion' });
++  }
++}
++
++async function restoreRecord(req, res) {
++  try {
++    const record = await reviewDeletion(req, req.params.id, 'RESTORE', req.body?.note);
++    return res.json({ success: true, message: 'Record restored successfully.', data: record });
++  } catch (error) {
++    return res.status(error.statusCode || 500).json({ success: false, message: error.message || 'Failed to restore record' });
++  }
++}
++
++module.exports = { listRecords, getSummary, getRecord, confirmRecord, restoreRecord };
+diff --git a/backend/src/routes/deletion.routes.js b/backend/src/routes/deletion.routes.js
+new file mode 100644
+--- /dev/null
++++ b/backend/src/routes/deletion.routes.js
+@@ -0,0 +1,28 @@
++'use strict';
++
++const express = require('express');
++const router = express.Router();
++const authMiddleware = require('../middleware/auth.middleware');
++const deletionController = require('../controllers/deletion.controller');
++const { isReservedSuperAdmin } = require('../utils/superAdmin');
++
++function primarySuperAdminOnly(req, res, next) {
++  if (req.user?.role !== 'SUPER_ADMIN' || !isReservedSuperAdmin(req.user)) {
++    return res.status(403).json({
++      success: false,
++      message: 'Deletion Center is limited to the primary Super Admin.',
++    });
++  }
++  return next();
++}
++
++router.use(authMiddleware);
++router.use(primarySuperAdminOnly);
++
++router.get('/summary', deletionController.getSummary);
++router.get('/records', deletionController.listRecords);
++router.get('/records/:id', deletionController.getRecord);
++router.post('/records/:id/confirm', deletionController.confirmRecord);
++router.post('/records/:id/restore', deletionController.restoreRecord);
++
++module.exports = router;
+diff --git a/backend/src/middleware/audit.middleware.js b/backend/src/middleware/audit.middleware.js
+--- a/backend/src/middleware/audit.middleware.js
++++ b/backend/src/middleware/audit.middleware.js
+@@ -15,4 +15,5 @@
+   if (!MUTATING_METHODS.has(String(req.method || '').toUpperCase())) return next();
+   if (String(req.originalUrl || '').startsWith('/api/v1/audit')) return next();
++  if (String(req.originalUrl || '').startsWith('/api/v1/deletions')) return next();
+ 
+   const requestId
+@@ -23,4 +24,4 @@
+   res.once('finish', () => {
+-    if (!req.user) return;
++    if (!req.user || req.skipCentralAudit) return;
+ 
+     const actor = actorSnapshot(req);
+diff --git a/backend/src/app.js b/backend/src/app.js
+--- a/backend/src/app.js
++++ b/backend/src/app.js
+@@ -78,4 +78,5 @@
+ app.use('/api', require('./middleware/audit.middleware'));
+ app.use('/api/v1/audit', require('./routes/audit.routes'));
++app.use('/api/v1/deletions', require('./routes/deletion.routes'));
+ 
+ app.use('/api/v1/auth', authRoutes);
+diff --git a/backend/src/controllers/recruitment.controller.js b/backend/src/controllers/recruitment.controller.js
+--- a/backend/src/controllers/recruitment.controller.js
++++ b/backend/src/controllers/recruitment.controller.js
+@@ -1,5 +1,10 @@
+ const prisma = require('../config/database');
+ const { notifyHrAboutNewApplication } = require('../services/recruitment-notification.service');
+ const emailService = require('../services/email.service');
++const {
++  getActiveDeletionIds,
++  assertEntityVisible,
++  requestSoftDelete,
++} = require('../services/deletion.service');
+ 
+ const JOB_WRITE_FIELDS
+@@ -35,16 +35,29 @@
+ exports.getAllJobs = async (req, res, next) => {
+   try {
+     const { status } = req.query;
++    const [deletedJobIds, deletedApplicationIds] = await Promise.all([
++      getActiveDeletionIds('JOB'),
++      getActiveDeletionIds('APPLICATION'),
++    ]);
+     const where = {};
+     if (status) where.status = status;
++    if (deletedJobIds.length) where.id = { notIn: deletedJobIds };
+     const [jobs, applicationPositions] = await Promise.all([
+       prisma.job.findMany({
+         where,
+-        include: { applications: { select: { id: true, status: true } } },
++        include: {
++          applications: {
++            where: deletedApplicationIds.length ? { id: { notIn: deletedApplicationIds } } : undefined,
++            select: { id: true, status: true }
++          }
++        },
+         orderBy: { postedAt: 'desc' }
+       }),
+       prisma.application.findMany({
+-        where: { targetPosition: { not: null } },
++        where: {
++          targetPosition: { not: null },
++          ...(deletedApplicationIds.length ? { id: { notIn: deletedApplicationIds } } : {})
++        },
+         select: { targetPosition: true },
+         distinct: ['targetPosition']
+       })
+@@ -80,4 +80,5 @@
+ exports.updateJob = async (req, res, next) => {
+   try {
+     const { id } = req.params;
++    await assertEntityVisible('JOB', id);
+     const data = sanitizeJobPayload(req.body, { partial: true });
+@@ -100,9 +100,12 @@
+-// Delete job safely. Block deletion when applications exist to avoid candidate data loss.
++// Soft delete job. Existing business safety still blocks jobs with active applications.
+ exports.deleteJob = async (req, res, next) => {
+   try {
+     const { id } = req.params;
+-    const applicationsCount = await prisma.application.count({ where: { jobId: id } });
++    const deletedApplicationIds = await getActiveDeletionIds('APPLICATION');
++    const applicationsWhere = { jobId: id };
++    if (deletedApplicationIds.length) applicationsWhere.id = { notIn: deletedApplicationIds };
+ 
++    const applicationsCount = await prisma.application.count({ where: applicationsWhere });
+     if (applicationsCount > 0) {
+       return res.status(400).json({
+         success: false,
+@@ -110,8 +113,19 @@
+       });
+     }
+ 
+-    await prisma.job.delete({ where: { id } });
+-    res.json({ success: true, message: 'Job deleted' });
++    const result = await requestSoftDelete(
++      req,
++      'JOB',
++      id,
++      req.body?.reason || 'Job deletion requested from Recruitment'
++    );
++    return res.status(result.alreadyDeleted ? 200 : 202).json({
++      success: true,
++      message: result.alreadyDeleted
++        ? 'Job is already in the Recycle Bin.'
++        : 'Job moved to Recycle Bin pending Super Admin review.',
++      deletionRecordId: result.record.id,
++    });
+   } catch (error) {
+     next(error);
+   }
+@@ -135,6 +135,10 @@
+ exports.getPublicJobs = async (req, res, next) => {
+   try {
++    const deletedJobIds = await getActiveDeletionIds('JOB');
+     const jobs = await prisma.job.findMany({
+-      where: { status: 'OPEN' },
++      where: {
++        status: 'OPEN',
++        ...(deletedJobIds.length ? { id: { notIn: deletedJobIds } } : {})
++      },
+       orderBy: { postedAt: 'desc' }
+     });
+@@ -265,4 +265,5 @@
+ exports.applyForJob = async (req, res, next) => {
+   try {
+     const { jobId, firstName, lastName, email, phone, coverLetter } = req.body;
++    if (jobId) await assertEntityVisible('JOB', jobId);
+     const application = await prisma.application.create({
+@@ -370,4 +370,8 @@
+     const where = {};
+     const andFilters = [];
++    const deletedApplicationIds = await getActiveDeletionIds('APPLICATION');
++    if (deletedApplicationIds.length) {
++      andFilters.push({ id: { notIn: deletedApplicationIds } });
++    }
+ 
+     if (jobId) where.jobId = jobId;
+@@ -500,4 +500,5 @@
+ exports.getApplication = async (req, res, next) => {
+   try {
+     const { id } = req.params;
++    await assertEntityVisible('APPLICATION', id);
+     const application = await prisma.application.findUnique({
+@@ -530,4 +530,5 @@
+ exports.updateApplication = async (req, res, next) => {
+   try {
+     const { id } = req.params;
++    await assertEntityVisible('APPLICATION', id);
+     const updateData = {};
+@@ -585,4 +585,5 @@
+ exports.updateApplicationStatus = async (req, res, next) => {
+   try {
+     const { id } = req.params;
++    await assertEntityVisible('APPLICATION', id);
+     const { status } = req.body;
+@@ -620,9 +620,20 @@
+-// Delete application
++// Soft delete application; physical candidate data remains intact for recovery.
+ exports.deleteApplication = async (req, res, next) => {
+   try {
+     const { id } = req.params;
+-    await prisma.application.delete({ where: { id } });
+-    res.json({ success: true, message: 'Application deleted' });
++    const result = await requestSoftDelete(
++      req,
++      'APPLICATION',
++      id,
++      req.body?.reason || 'Application deletion requested from Recruitment'
++    );
++    return res.status(result.alreadyDeleted ? 200 : 202).json({
++      success: true,
++      message: result.alreadyDeleted
++        ? 'Application is already in the Recycle Bin.'
++        : 'Application moved to Recycle Bin pending Super Admin review.',
++      deletionRecordId: result.record.id,
++    });
+   } catch (error) {
+     next(error);
+   }
+@@ -655,14 +655,16 @@
+ // Stats
+ exports.getStats = async (req, res, next) => {
+   try {
++    const deletedApplicationIds = await getActiveDeletionIds('APPLICATION');
++    const visibleWhere = deletedApplicationIds.length ? { id: { notIn: deletedApplicationIds } } : {};
+     const [totalApplications, hired, rejected, newApplications, interviewScheduled, statusGroups] = await Promise.all([
+-      prisma.application.count(),
+-      prisma.application.count({ where: { status: "HIRED" } }),
+-      prisma.application.count({ where: { status: "REJECTED" } }),
+-      prisma.application.count({ where: { status: "SUBMITTED" } }),
+-      prisma.application.count({ where: { status: "INTERVIEW_SCHEDULED" } }),
+-      // Real per-stage counts for the recruitment pipeline UI (all statuses, not just the 4 above).
+-      prisma.application.groupBy({ by: ['status'], _count: { status: true } })
++      prisma.application.count({ where: visibleWhere }),
++      prisma.application.count({ where: { ...visibleWhere, status: "HIRED" } }),
++      prisma.application.count({ where: { ...visibleWhere, status: "REJECTED" } }),
++      prisma.application.count({ where: { ...visibleWhere, status: "SUBMITTED" } }),
++      prisma.application.count({ where: { ...visibleWhere, status: "INTERVIEW_SCHEDULED" } }),
++      // Real per-stage counts for the recruitment pipeline UI (all visible statuses).
++      prisma.application.groupBy({ by: ['status'], where: visibleWhere, _count: { status: true } })
+     ]);
+ 
+     const byStatus = statusGroups.reduce((acc, row) => {
