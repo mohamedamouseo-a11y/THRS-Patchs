@@ -1,0 +1,715 @@
+diff --git a/backend/prisma/schema.prisma b/backend/prisma/schema.prisma
+--- a/backend/prisma/schema.prisma
++++ b/backend/prisma/schema.prisma
+@@ -1337,6 +1337,34 @@ model DeletionRecord {
+   @@map("deletion_records")
+ }
+ 
++model RecoveryRecord {
++  id              String @id @default(uuid())
++  originalAuditId String @unique
++  reversalAuditId String @unique
++
++  module         String
++  entityType     String?
++  entityId       String?
++  originalAction String
++  status         String @default("COMPLETED")
++  note           String?
++
++  requestedById    String?
++  requestedByName  String?
++  requestedByEmail String?
++  requestedByRole  String?
++  requestedAt      DateTime @default(now())
++
++  metadata Json?
++
++  createdAt DateTime @default(now())
++  updatedAt DateTime @updatedAt
++
++  @@index([createdAt])
++  @@index([module, createdAt])
++  @@index([entityType, entityId])
++  @@index([requestedById, createdAt])
++  @@map("recovery_records")
++}
++
+ enum NotificationType {
+   LEAVE_REQUEST
+   LEAVE_STATUS
+diff --git a/backend/prisma/migrations/20260829000300_central_recovery_engine/migration.sql b/backend/prisma/migrations/20260829000300_central_recovery_engine/migration.sql
+new file mode 100644
+--- /dev/null
++++ b/backend/prisma/migrations/20260829000300_central_recovery_engine/migration.sql
+@@ -0,0 +1,38 @@
++-- THRS Central Recovery / Undo Engine — Phase 3A
++-- Immutable audit history is preserved. Reversals are stored as new audit events.
++
++CREATE TABLE "recovery_records" (
++  "id" TEXT NOT NULL,
++  "originalAuditId" TEXT NOT NULL,
++  "reversalAuditId" TEXT NOT NULL,
++  "module" TEXT NOT NULL,
++  "entityType" TEXT,
++  "entityId" TEXT,
++  "originalAction" TEXT NOT NULL,
++  "status" TEXT NOT NULL DEFAULT 'COMPLETED',
++  "note" TEXT,
++  "requestedById" TEXT,
++  "requestedByName" TEXT,
++  "requestedByEmail" TEXT,
++  "requestedByRole" TEXT,
++  "requestedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
++  "metadata" JSONB,
++  "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
++  "updatedAt" TIMESTAMP(3) NOT NULL,
++  CONSTRAINT "recovery_records_pkey" PRIMARY KEY ("id")
++);
++
++CREATE UNIQUE INDEX "recovery_records_originalAuditId_key"
++  ON "recovery_records"("originalAuditId");
++CREATE UNIQUE INDEX "recovery_records_reversalAuditId_key"
++  ON "recovery_records"("reversalAuditId");
++CREATE INDEX "recovery_records_createdAt_idx"
++  ON "recovery_records"("createdAt");
++CREATE INDEX "recovery_records_module_createdAt_idx"
++  ON "recovery_records"("module", "createdAt");
++CREATE INDEX "recovery_records_entityType_entityId_idx"
++  ON "recovery_records"("entityType", "entityId");
++CREATE INDEX "recovery_records_requestedById_createdAt_idx"
++  ON "recovery_records"("requestedById", "createdAt");
+diff --git a/backend/src/services/audit.service.js b/backend/src/services/audit.service.js
+--- a/backend/src/services/audit.service.js
++++ b/backend/src/services/audit.service.js
+@@ -100,9 +100,9 @@ function inferContext(req) {
+   return { route, moduleName, entity, entityId, method, action };
+ }
+ 
+-async function recordAuditEvent(input) {
++async function recordAuditEvent(input, db = prisma) {
+   try {
+-    return await prisma.auditLog.create({
++    return await db.auditLog.create({
+       data: {
+         userId: input.userId || null,
+         actorName: input.actorName || null,
+diff --git a/backend/src/services/recovery.service.js b/backend/src/services/recovery.service.js
+new file mode 100644
+--- /dev/null
++++ b/backend/src/services/recovery.service.js
+@@ -0,0 +1,235 @@
++'use strict';
++
++const prisma = require('../config/database');
++const {
++  actorSnapshot,
++  clientIp,
++  recordAuditEvent,
++  sanitizeForAudit,
++} = require('./audit.service');
++
++const SUPPORTED_ACTIONS = ['SOFT_DELETE', 'CONFIRM_DELETE'];
++
++function httpError(statusCode, message, code) {
++  const error = new Error(message);
++  error.statusCode = statusCode;
++  error.code = code || null;
++  return error;
++}
++
++function cleanNote(value) {
++  const text = String(value || '').trim();
++  return text ? text.slice(0, 1000) : null;
++}
++
++function deletionRecordIdFromEvent(event) {
++  return event?.metadata?.deletionRecordId
++    || event?.afterState?.deletionRecordId
++    || event?.beforeState?.deletionRecordId
++    || null;
++}
++
++function key(entityType, entityId) {
++  return `${String(entityType || '')}:${String(entityId || '')}`;
++}
++
++async function getRecoveryStatus(auditId) {
++  const event = await prisma.auditLog.findUnique({ where: { id: String(auditId) } });
++  if (!event) throw httpError(404, 'Audit event not found', 'AUDIT_EVENT_NOT_FOUND');
++
++  const recovery = await prisma.recoveryRecord.findUnique({
++    where: { originalAuditId: event.id },
++  });
++
++  const supported = Boolean(event.reversible)
++    && event.outcome === 'SUCCESS'
++    && SUPPORTED_ACTIONS.includes(event.action);
++
++  let active = false;
++  const deletionRecordId = deletionRecordIdFromEvent(event);
++  if (supported && deletionRecordId) {
++    const deletion = await prisma.deletionRecord.findUnique({
++      where: { id: String(deletionRecordId) },
++      select: { isActive: true, status: true },
++    });
++    active = Boolean(deletion?.isActive);
++  }
++
++  return {
++    event,
++    recovery,
++    supported,
++    available: supported && !recovery && active,
++    reason: !supported
++      ? 'NOT_SUPPORTED'
++      : recovery
++        ? 'ALREADY_UNDONE'
++        : active
++          ? null
++          : 'SOURCE_ALREADY_RESTORED_OR_INACTIVE',
++  };
++}
++
++async function listRecoverableEvents(query = {}) {
++  const page = Math.max(1, Number.parseInt(query.page, 10) || 1);
++  const pageSize = Math.min(100, Math.max(10, Number.parseInt(query.pageSize, 10) || 25));
++  const where = {
++    reversible: true,
++    outcome: 'SUCCESS',
++    action: { in: SUPPORTED_ACTIONS },
++  };
++
++  if (query.module) where.module = String(query.module).trim().toUpperCase();
++
++  const [total, events] = await Promise.all([
++    prisma.auditLog.count({ where }),
++    prisma.auditLog.findMany({
++      where,
++      orderBy: { createdAt: 'desc' },
++      skip: (page - 1) * pageSize,
++      take: pageSize,
++    }),
++  ]);
++
++  const ids = events.map((event) => event.id);
++  const recoveries = ids.length
++    ? await prisma.recoveryRecord.findMany({ where: { originalAuditId: { in: ids } } })
++    : [];
++  const recoveryByAudit = new Map(recoveries.map((row) => [row.originalAuditId, row]));
++
++  const entityPairs = events
++    .filter((event) => event.entity && event.entityId)
++    .map((event) => ({ entityType: event.entity, entityId: String(event.entityId), isActive: true }));
++  const activeDeletions = entityPairs.length
++    ? await prisma.deletionRecord.findMany({ where: { OR: entityPairs }, select: { entityType: true, entityId: true } })
++    : [];
++  const activeKeys = new Set(activeDeletions.map((row) => key(row.entityType, row.entityId)));
++
++  return {
++    events: events.map((event) => {
++      const recovery = recoveryByAudit.get(event.id) || null;
++      const active = activeKeys.has(key(event.entity, event.entityId));
++      return {
++        ...event,
++        recovery,
++        recoveryAvailable: !recovery && active,
++      };
++    }),
++    pagination: {
++      page,
++      pageSize,
++      total,
++      pages: Math.max(1, Math.ceil(total / pageSize)),
++    },
++  };
++}
++
++async function getRecoverySummary() {
++  const [eligibleEvents, completedRecoveries, latestRecovery] = await Promise.all([
++    prisma.auditLog.count({
++      where: { reversible: true, outcome: 'SUCCESS', action: { in: SUPPORTED_ACTIONS } },
++    }),
++    prisma.recoveryRecord.count({ where: { status: 'COMPLETED' } }),
++    prisma.recoveryRecord.findFirst({ orderBy: { createdAt: 'desc' }, select: { createdAt: true } }),
++  ]);
++
++  return {
++    eligibleEvents,
++    completedRecoveries,
++    remaining: Math.max(0, eligibleEvents - completedRecoveries),
++    latestRecoveryAt: latestRecovery?.createdAt || null,
++    supportedActions: SUPPORTED_ACTIONS,
++  };
++}
++
++async function undoAuditEvent(req, auditId, note) {
++  const originalAuditId = String(auditId || '').trim();
++  if (!originalAuditId) throw httpError(400, 'Audit event ID is required', 'AUDIT_EVENT_ID_REQUIRED');
++
++  const actor = actorSnapshot(req);
++  const reviewNote = cleanNote(note);
++  const now = new Date();
++
++  return prisma.$transaction(async (tx) => {
++    const event = await tx.auditLog.findUnique({ where: { id: originalAuditId } });
++    if (!event) throw httpError(404, 'Audit event not found', 'AUDIT_EVENT_NOT_FOUND');
++    if (!event.reversible || event.outcome !== 'SUCCESS' || !SUPPORTED_ACTIONS.includes(event.action)) {
++      throw httpError(409, 'This audit event is not recoverable in Phase 3A.', 'RECOVERY_NOT_SUPPORTED');
++    }
++
++    const existing = await tx.recoveryRecord.findUnique({ where: { originalAuditId: event.id } });
++    if (existing) throw httpError(409, 'This audit event has already been undone.', 'RECOVERY_ALREADY_COMPLETED');
++
++    const deletionRecordId = deletionRecordIdFromEvent(event);
++    if (!deletionRecordId) {
++      throw httpError(409, 'The deletion governance record cannot be resolved.', 'DELETION_RECORD_NOT_RESOLVED');
++    }
++
++    const deletion = await tx.deletionRecord.findUnique({ where: { id: String(deletionRecordId) } });
++    if (!deletion) throw httpError(404, 'Deletion record not found', 'DELETION_RECORD_NOT_FOUND');
++    if (!deletion.isActive) {
++      throw httpError(409, 'The source record is already restored or inactive.', 'SOURCE_ALREADY_RESTORED');
++    }
++
++    const restored = await tx.deletionRecord.update({
++      where: { id: deletion.id },
++      data: {
++        status: 'RESTORED',
++        isActive: false,
++        reviewedById: actor.userId || null,
++        reviewedByName: actor.actorName || null,
++        reviewedByEmail: actor.actorEmail || null,
++        reviewedByRole: actor.actorRole || null,
++        reviewedAt: now,
++        restoredAt: now,
++        reviewNote: reviewNote || `Undo of audit event ${event.id}`,
++      },
++    });
++
++    const reversalEvent = await recordAuditEvent({
++      ...actor,
++      action: 'UNDO',
++      module: event.module,
++      entity: event.entity,
++      entityId: event.entityId,
++      summary: `Undo ${event.action} for ${event.entity || 'record'}`,
++      beforeState: {
++        originalAuditId: event.id,
++        deletionRecordId: deletion.id,
++        deletionStatus: deletion.status,
++        deletionActive: deletion.isActive,
++      },
++      afterState: {
++        deletionRecordId: restored.id,
++        deletionStatus: restored.status,
++        deletionActive: restored.isActive,
++      },
++      metadata: {
++        reversalOfAuditId: event.id,
++        originalAction: event.action,
++        note: reviewNote,
++      },
++      requestId: req.auditRequestId || null,
++      method: req.method || 'POST',
++      route: req.originalUrl || null,
++      outcome: 'SUCCESS',
++      statusCode: 200,
++      source: actor.source || 'WEB',
++      reversible: false,
++      ipAddress: clientIp(req),
++      userAgent: req.get?.('user-agent') || null,
++    }, tx);
++
++    if (!reversalEvent) {
++      throw httpError(500, 'Unable to write reversal audit event.', 'REVERSAL_AUDIT_WRITE_FAILED');
++    }
++
++    const recovery = await tx.recoveryRecord.create({
++      data: {
++        originalAuditId: event.id,
++        reversalAuditId: reversalEvent.id,
++        module: event.module,
++        entityType: event.entity || null,
++        entityId: event.entityId || null,
++        originalAction: event.action,
++        status: 'COMPLETED',
++        note: reviewNote,
++        requestedById: actor.userId || null,
++        requestedByName: actor.actorName || null,
++        requestedByEmail: actor.actorEmail || null,
++        requestedByRole: actor.actorRole || null,
++        metadata: sanitizeForAudit({
++          deletionRecordId: restored.id,
++          requestId: req.auditRequestId || null,
++        }),
++      },
++    });
++
++    return { recovery, reversalEvent, restored };
++  });
++}
++
++module.exports = {
++  SUPPORTED_ACTIONS,
++  getRecoveryStatus,
++  listRecoverableEvents,
++  getRecoverySummary,
++  undoAuditEvent,
++};
+diff --git a/backend/src/controllers/recovery.controller.js b/backend/src/controllers/recovery.controller.js
+new file mode 100644
+--- /dev/null
++++ b/backend/src/controllers/recovery.controller.js
+@@ -0,0 +1,65 @@
++'use strict';
++
++const {
++  getRecoveryStatus,
++  listRecoverableEvents,
++  getRecoverySummary,
++  undoAuditEvent,
++} = require('../services/recovery.service');
++
++function sendError(res, error, fallback) {
++  return res.status(error.statusCode || 500).json({
++    success: false,
++    code: error.code || 'RECOVERY_ERROR',
++    message: error.message || fallback,
++  });
++}
++
++async function summary(req, res) {
++  try {
++    return res.json({ success: true, data: await getRecoverySummary() });
++  } catch (error) {
++    console.error('Recovery summary error:', error);
++    return sendError(res, error, 'Failed to load recovery summary');
++  }
++}
++
++async function events(req, res) {
++  try {
++    return res.json({ success: true, data: await listRecoverableEvents(req.query) });
++  } catch (error) {
++    console.error('Recovery events error:', error);
++    return sendError(res, error, 'Failed to load recoverable events');
++  }
++}
++
++async function status(req, res) {
++  try {
++    const result = await getRecoveryStatus(req.params.auditId);
++    return res.json({ success: true, data: result });
++  } catch (error) {
++    return sendError(res, error, 'Failed to load recovery status');
++  }
++}
++
++async function undo(req, res) {
++  try {
++    const result = await undoAuditEvent(req, req.params.auditId, req.body?.note);
++    return res.json({
++      success: true,
++      message: 'Action undone. The original audit event was preserved and a reversal event was added.',
++      data: result,
++    });
++  } catch (error) {
++    return sendError(res, error, 'Failed to undo audit event');
++  }
++}
++
++module.exports = { summary, events, status, undo };
+diff --git a/backend/src/routes/recovery.routes.js b/backend/src/routes/recovery.routes.js
+new file mode 100644
+--- /dev/null
++++ b/backend/src/routes/recovery.routes.js
+@@ -0,0 +1,29 @@
++'use strict';
++
++const express = require('express');
++const router = express.Router();
++const authMiddleware = require('../middleware/auth.middleware');
++const recoveryController = require('../controllers/recovery.controller');
++const { isReservedSuperAdmin } = require('../utils/superAdmin');
++
++function primarySuperAdminOnly(req, res, next) {
++  if (req.user?.role !== 'SUPER_ADMIN' || !isReservedSuperAdmin(req.user)) {
++    return res.status(403).json({
++      success: false,
++      message: 'Recovery Center is limited to the primary Super Admin.',
++    });
++  }
++  return next();
++}
++
++router.use(authMiddleware);
++router.use(primarySuperAdminOnly);
++
++router.get('/summary', recoveryController.summary);
++router.get('/events', recoveryController.events);
++router.get('/events/:auditId/status', recoveryController.status);
++router.post('/events/:auditId/undo', recoveryController.undo);
++
++module.exports = router;
+diff --git a/backend/src/middleware/audit.middleware.js b/backend/src/middleware/audit.middleware.js
+--- a/backend/src/middleware/audit.middleware.js
++++ b/backend/src/middleware/audit.middleware.js
+@@ -15,6 +15,7 @@ function centralAuditMiddleware(req, res, next) {
+   if (!MUTATING_METHODS.has(String(req.method || '').toUpperCase())) return next();
+   if (String(req.originalUrl || '').startsWith('/api/v1/audit')) return next();
+   if (String(req.originalUrl || '').startsWith('/api/v1/deletions')) return next();
++  if (String(req.originalUrl || '').startsWith('/api/v1/recovery')) return next();
+ 
+   const requestId = String(req.headers['x-request-id'] || '').trim() || crypto.randomUUID();
+   const startedAt = Date.now();
+diff --git a/backend/src/app.js b/backend/src/app.js
+--- a/backend/src/app.js
++++ b/backend/src/app.js
+@@ -78,6 +78,7 @@ app.use('/api', require('./middleware/audit.middleware'));
+ app.use('/api/v1/audit', require('./routes/audit.routes'));
+ app.use('/api/v1/deletions', require('./routes/deletion.routes'));
++app.use('/api/v1/recovery', require('./routes/recovery.routes'));
+ 
+ app.use('/api/v1/auth', authRoutes);
+ app.use('/api/v1/employees', employeeRoutes);
+diff --git a/frontend/src/App.jsx b/frontend/src/App.jsx
+--- a/frontend/src/App.jsx
++++ b/frontend/src/App.jsx
+@@ -67,6 +67,7 @@ const OAuthCallback = lazy(() => import('./pages/OAuthCallback'));
+ const DatabaseBackupOAuthCallback = lazy(() => import('./pages/DatabaseBackupOAuthCallback'));
+ const DeletionCenter = lazy(() => import('./pages/DeletionCenter'));
+ const AuditCenter = lazy(() => import('./pages/AuditCenter'));
++const RecoveryCenter = lazy(() => import('./pages/RecoveryCenter'));
+ const CompanyOverviewReport = lazy(() => import('./pages/reports/CompanyOverviewReport'));
+ const AttendanceSummaryReport = lazy(() => import('./pages/reports/AttendanceSummaryReport'));
+ const LeaveUtilizationReport = lazy(() => import('./pages/reports/LeaveUtilizationReport'));
+@@ -218,6 +219,7 @@ const AppRoutes = () => {
+       <Route path="/settings" element={<ProtectedRoute roles={['SUPER_ADMIN', 'CEO', 'HR_ADMIN']}><Settings /></ProtectedRoute>} />
+             <Route path="/deletion-center" element={<ReservedSuperAdminRoute><DeletionCenter /></ReservedSuperAdminRoute>} />
+ <Route path="/audit-center" element={<ReservedSuperAdminRoute><AuditCenter /></ReservedSuperAdminRoute>} />
++<Route path="/recovery-center" element={<ReservedSuperAdminRoute><RecoveryCenter /></ReservedSuperAdminRoute>} />
+ <Route path="/executive-ai" element={<ReservedSuperAdminRoute><ExecutiveAIWorkspace /></ReservedSuperAdminRoute>} />
+       <Route path="/database-backups/oauth/callback" element={<ReservedSuperAdminRoute><DatabaseBackupOAuthCallback /></ReservedSuperAdminRoute>} />
+       {/* Default Redirect */}
+diff --git a/frontend/src/components/Layout/Sidebar.jsx b/frontend/src/components/Layout/Sidebar.jsx
+--- a/frontend/src/components/Layout/Sidebar.jsx
++++ b/frontend/src/components/Layout/Sidebar.jsx
+@@ -174,6 +174,7 @@ const SIDEBAR_SECTIONS = [
+       { path: '/documents', label: 'Documents', icon: '📄', roles: ALL_ROLES },
+       { path: '/deletion-center', label: 'Recycle Bin', icon: '♻️', roles: ['SUPER_ADMIN'], reservedOnly: true },
+       { path: '/audit-center', label: 'Audit Center', icon: '🛡️', roles: ['SUPER_ADMIN'], reservedOnly: true },
++      { path: '/recovery-center', label: 'Recovery Center', icon: '↩️', roles: ['SUPER_ADMIN'], reservedOnly: true },
+       { path: '/settings', label: 'Settings', icon: '⚙️', roles: ['SUPER_ADMIN', 'HR_ADMIN'] },
+     ]
+   },
+diff --git a/frontend/src/pages/RecoveryCenter.jsx b/frontend/src/pages/RecoveryCenter.jsx
+new file mode 100644
+--- /dev/null
++++ b/frontend/src/pages/RecoveryCenter.jsx
+@@ -0,0 +1,256 @@
++import React, { useCallback, useEffect, useState } from 'react';
++import api from '../services/api';
++import '../styles/thrs-recovery-center.css';
++
++function prettyToken(value) {
++  return String(value || '—')
++    .replace(/_/g, ' ')
++    .toLowerCase()
++    .replace(/\b\w/g, (char) => char.toUpperCase());
++}
++
++function formatDate(value) {
++  if (!value) return '—';
++  const date = new Date(value);
++  if (Number.isNaN(date.getTime())) return '—';
++  return date.toLocaleString(undefined, {
++    year: 'numeric', month: 'short', day: '2-digit', hour: '2-digit', minute: '2-digit',
++  });
++}
++
++const RecoveryCenter = () => {
++  const [summary, setSummary] = useState({ eligibleEvents: 0, completedRecoveries: 0, remaining: 0, latestRecoveryAt: null });
++  const [events, setEvents] = useState([]);
++  const [pagination, setPagination] = useState({ page: 1, pageSize: 25, total: 0, pages: 1 });
++  const [moduleName, setModuleName] = useState('');
++  const [selected, setSelected] = useState(null);
++  const [undoTarget, setUndoTarget] = useState(null);
++  const [note, setNote] = useState('');
++  const [loading, setLoading] = useState(true);
++  const [submitting, setSubmitting] = useState(false);
++  const [error, setError] = useState('');
++  const [notice, setNotice] = useState('');
++
++  const loadSummary = useCallback(async () => {
++    try {
++      const response = await api.get('/recovery/summary');
++      setSummary(response?.data || {});
++    } catch (requestError) {
++      console.error('Recovery summary failed:', requestError);
++    }
++  }, []);
++
++  const loadEvents = useCallback(async (page = 1, pageSize = pagination.pageSize) => {
++    setLoading(true);
++    setError('');
++    try {
++      const params = { page, pageSize };
++      if (moduleName.trim()) params.module = moduleName.trim().toUpperCase();
++      const response = await api.get('/recovery/events', { params });
++      setEvents(response?.data?.events || []);
++      setPagination(response?.data?.pagination || { page, pageSize, total: 0, pages: 1 });
++    } catch (requestError) {
++      setError(requestError?.message || 'Failed to load recoverable activity.');
++    } finally {
++      setLoading(false);
++    }
++  }, [moduleName, pagination.pageSize]);
++
++  useEffect(() => { loadSummary(); }, [loadSummary]);
++  useEffect(() => { loadEvents(1, pagination.pageSize); }, [loadEvents, pagination.pageSize]);
++
++  const submitUndo = async () => {
++    if (!undoTarget || submitting) return;
++    setSubmitting(true);
++    setError('');
++    setNotice('');
++    try {
++      await api.post(`/recovery/events/${undoTarget.id}/undo`, { note: note.trim() || undefined });
++      setNotice('Recovery completed. The source record is visible again and the original audit event was preserved.');
++      setUndoTarget(null);
++      setNote('');
++      setSelected(null);
++      await Promise.all([loadSummary(), loadEvents(pagination.page, pagination.pageSize)]);
++    } catch (requestError) {
++      setError(requestError?.message || 'Unable to undo this activity.');
++    } finally {
++      setSubmitting(false);
++    }
++  };
++
++  return (
++    <div className="thrs-recovery-center">
++      <header className="thrs-recovery-hero">
++        <div>
++          <span className="thrs-recovery-eyebrow">SYSTEM GOVERNANCE · PHASE 3A</span>
++          <h1>Recovery Center</h1>
++          <p>Controlled reversal of supported actions without rewriting the immutable audit history.</p>
++        </div>
++        <span className="thrs-recovery-badge">UNDO ENGINE ACTIVE</span>
++      </header>
++
++      <section className="thrs-recovery-kpis">
++        <article><span>Eligible events</span><strong>{summary.eligibleEvents || 0}</strong><small>Supported reversible audit events</small></article>
++        <article><span>Completed recoveries</span><strong>{summary.completedRecoveries || 0}</strong><small>Immutable reversal records</small></article>
++        <article><span>Remaining</span><strong>{summary.remaining || 0}</strong><small>Eligible events not yet reversed</small></article>
++        <article><span>Latest recovery</span><strong className="is-date">{formatDate(summary.latestRecoveryAt)}</strong><small>Most recent completed undo</small></article>
++      </section>
++
++      <section className="thrs-recovery-note">
++        <div>
++          <strong>Original history is never rewritten.</strong>
++          <span>Undo creates a new reversal audit event and a separate RecoveryRecord.</span>
++        </div>
++        <span>Phase 3A · Soft Delete Recovery</span>
++      </section>
++
++      {notice && <div className="thrs-recovery-notice">{notice}</div>}
++      {error && <div className="thrs-recovery-error">{error}</div>}
++
++      <section className="thrs-recovery-card">
++        <div className="thrs-recovery-toolbar">
++          <div>
++            <span className="thrs-recovery-eyebrow">RECOVERABLE LEDGER</span>
++            <h2>Supported Activity</h2>
++            <p>{pagination.total || 0} reversible governance events</p>
++          </div>
++          <div className="thrs-recovery-filter">
++            <input value={moduleName} onChange={(event) => setModuleName(event.target.value)} placeholder="Module e.g. RECRUITMENT" />
++            <button type="button" onClick={() => loadEvents(1)}>Apply</button>
++          </div>
++        </div>
++
++        <div className="thrs-recovery-table-wrap">
++          <table className="thrs-recovery-table">
++            <thead><tr><th>Time</th><th>Actor</th><th>Original action</th><th>Target</th><th>Recovery state</th><th /></tr></thead>
++            <tbody>
++              {loading && <tr><td colSpan="6" className="thrs-recovery-empty">Loading recovery ledger…</td></tr>}
++              {!loading && events.length === 0 && <tr><td colSpan="6" className="thrs-recovery-empty">No supported reversible events found.</td></tr>}
++              {!loading && events.map((event) => (
++                <tr key={event.id}>
++                  <td><strong>{formatDate(event.createdAt)}</strong><small>{event.requestId ? event.requestId.slice(0, 8) : 'No request ID'}</small></td>
++                  <td><strong>{event.actorName || event.actorEmail || 'System actor'}</strong><small>{prettyToken(event.actorRole)}</small></td>
++                  <td><span className="thrs-recovery-action">{prettyToken(event.action)}</span><small>{event.method || '—'}</small></td>
++                  <td><strong>{prettyToken(event.module)}</strong><small>{event.entity || '—'} · {String(event.entityId || '—').slice(0, 12)}</small></td>
++                  <td>
++                    <span className={`thrs-recovery-state ${event.recovery ? 'is-complete' : event.recoveryAvailable ? 'is-ready' : 'is-locked'}`}>
++                      {event.recovery ? 'Recovered' : event.recoveryAvailable ? 'Undo available' : 'Inactive'}
++                    </span>
++                  </td>
++                  <td className="thrs-recovery-actions">
++                    <button type="button" onClick={() => setSelected(event)}>Inspect</button>
++                    {event.recoveryAvailable && <button type="button" className="is-undo" onClick={() => { setUndoTarget(event); setNote(''); }}>Undo</button>}
++                  </td>
++                </tr>
++              ))}
++            </tbody>
++          </table>
++        </div>
++
++        <footer className="thrs-recovery-pagination">
++          <span>Page {pagination.page} of {pagination.pages}</span>
++          <div>
++            <button type="button" disabled={pagination.page <= 1 || loading} onClick={() => loadEvents(pagination.page - 1)}>Previous</button>
++            <button type="button" disabled={pagination.page >= pagination.pages || loading} onClick={() => loadEvents(pagination.page + 1)}>Next</button>
++          </div>
++        </footer>
++      </section>
++
++      {selected && (
++        <div className="thrs-recovery-backdrop" onMouseDown={() => setSelected(null)}>
++          <aside className="thrs-recovery-drawer" onMouseDown={(event) => event.stopPropagation()}>
++            <div className="thrs-recovery-drawer-head">
++              <div><span className="thrs-recovery-eyebrow">ORIGINAL AUDIT EVENT</span><h2>{prettyToken(selected.action)} · {prettyToken(selected.module)}</h2><p>{selected.summary || 'Recorded reversible activity'}</p></div>
++              <button type="button" onClick={() => setSelected(null)}>×</button>
++            </div>
++            <div className="thrs-recovery-detail-grid">
++              <div><span>Audit ID</span><strong>{selected.id}</strong></div>
++              <div><span>Actor</span><strong>{selected.actorName || selected.actorEmail || 'System actor'}</strong></div>
++              <div><span>Entity</span><strong>{selected.entity || '—'} · {selected.entityId || '—'}</strong></div>
++              <div><span>Recovery</span><strong>{selected.recovery ? 'Already recovered' : selected.recoveryAvailable ? 'Available' : 'Unavailable'}</strong></div>
++            </div>
++            <pre className="thrs-recovery-json">{JSON.stringify({ beforeState: selected.beforeState, afterState: selected.afterState, metadata: selected.metadata }, null, 2)}</pre>
++            {selected.recoveryAvailable && <button className="thrs-recovery-drawer-undo" type="button" onClick={() => { setUndoTarget(selected); setSelected(null); }}>Undo this action</button>}
++          </aside>
++        </div>
++      )}
++
++      {undoTarget && (
++        <div className="thrs-recovery-backdrop">
++          <div className="thrs-recovery-modal">
++            <span className="thrs-recovery-eyebrow">CONTROLLED REVERSAL</span>
++            <h2>Undo {prettyToken(undoTarget.action)}?</h2>
++            <p>The original audit event will remain unchanged. THRS will restore the hidden source record and create a new UNDO event referencing it.</p>
++            <label><span>Recovery note · optional</span><textarea value={note} onChange={(event) => setNote(event.target.value)} maxLength={1000} placeholder="Reason or governance note…" /></label>
++            <div className="thrs-recovery-modal-actions">
++              <button type="button" disabled={submitting} onClick={() => { setUndoTarget(null); setNote(''); }}>Cancel</button>
++              <button type="button" className="is-primary" disabled={submitting} onClick={submitUndo}>{submitting ? 'Reversing…' : 'Confirm Undo'}</button>
++            </div>
++          </div>
++        </div>
++      )}
++    </div>
++  );
++};
++
++export default RecoveryCenter;
+diff --git a/frontend/src/styles/thrs-recovery-center.css b/frontend/src/styles/thrs-recovery-center.css
+new file mode 100644
+--- /dev/null
++++ b/frontend/src/styles/thrs-recovery-center.css
+@@ -0,0 +1,38 @@
++.thrs-recovery-center{display:grid;gap:18px;padding-bottom:28px;color:#18324a}.thrs-recovery-hero{display:flex;align-items:center;justify-content:space-between;gap:18px;padding:22px 24px;border:1px solid #e0e8ef;border-radius:18px;background:linear-gradient(118deg,#fff 0%,#fbfcfe 65%,#eef7f3 100%);box-shadow:0 12px 34px rgba(18,47,75,.08)}.thrs-recovery-eyebrow{display:block;margin-bottom:5px;color:#1b8a61;font-size:10px;font-weight:900;letter-spacing:.13em}.thrs-recovery-hero h1,.thrs-recovery-toolbar h2,.thrs-recovery-drawer h2,.thrs-recovery-modal h2{margin:0;color:#0b3154}.thrs-recovery-hero p,.thrs-recovery-toolbar p,.thrs-recovery-drawer p,.thrs-recovery-modal p{margin:5px 0 0;color:#718497;font-size:12px}.thrs-recovery-badge{padding:9px 12px;border:1px solid #cae6d8;border-radius:999px;background:#f0faf5;color:#18744f;font-size:10px;font-weight:900}.thrs-recovery-kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}.thrs-recovery-kpis article{padding:17px 18px;border:1px solid #e1e8ef;border-radius:15px;background:#fff;box-shadow:0 8px 24px rgba(18,47,75,.055)}.thrs-recovery-kpis span{display:block;color:#718497;font-size:10px;font-weight:900;text-transform:uppercase}.thrs-recovery-kpis strong{display:block;margin-top:5px;color:#0b3154;font-size:27px}.thrs-recovery-kpis strong.is-date{font-size:15px;padding-top:8px}.thrs-recovery-kpis small{display:block;margin-top:4px;color:#91a0ae;font-size:10px}.thrs-recovery-note{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:12px 15px;border:1px solid #dce8e2;border-radius:13px;background:#f7fbf9}.thrs-recovery-note div{display:flex;gap:8px;flex-wrap:wrap}.thrs-recovery-note strong{font-size:12px}.thrs-recovery-note span{color:#6e8479;font-size:11px}.thrs-recovery-notice,.thrs-recovery-error{padding:11px 13px;border-radius:11px;font-size:11px;font-weight:700}.thrs-recovery-notice{border:1px solid #bfe4d1;background:#effaf4;color:#18744f}.thrs-recovery-error{border:1px solid #f0c9c4;background:#fff5f3;color:#a23d33}.thrs-recovery-card{overflow:hidden;border:1px solid #e1e8ef;border-radius:17px;background:#fff;box-shadow:0 12px 32px rgba(18,47,75,.07)}.thrs-recovery-toolbar{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:17px 18px;border-bottom:1px solid #e7edf3}.thrs-recovery-toolbar h2{font-size:16px}.thrs-recovery-filter{display:flex;gap:7px}.thrs-recovery-filter input{width:210px;height:38px;padding:0 11px;border:1px solid #dbe4ec;border-radius:10px;outline:none}.thrs-recovery-filter button,.thrs-recovery-actions button,.thrs-recovery-pagination button,.thrs-recovery-drawer-undo,.thrs-recovery-modal-actions button{height:36px;padding:0 12px;border:1px solid #dbe4ec;border-radius:10px;background:#fff;color:#38536d;font-size:10px;font-weight:900;cursor:pointer}.thrs-recovery-table-wrap{overflow-x:auto}.thrs-recovery-table{width:100%;min-width:920px;border-collapse:collapse}.thrs-recovery-table th{padding:10px 12px;border-bottom:1px solid #dfe7ee;background:#f7f9fb;color:#486077;font-size:9px;font-weight:900;text-align:left;text-transform:uppercase}.thrs-recovery-table td{padding:11px 12px;border-bottom:1px solid #edf1f4;color:#263f57;font-size:11px}.thrs-recovery-table td strong,.thrs-recovery-table td small{display:block}.thrs-recovery-table td small{margin-top:3px;color:#8798a8;font-size:9px}.thrs-recovery-action,.thrs-recovery-state{display:inline-flex;padding:5px 8px;border-radius:999px;font-size:9px;font-weight:900}.thrs-recovery-action{background:#edf4fc;color:#316c9f}.thrs-recovery-state.is-ready{background:#e9f8f0;color:#188654}.thrs-recovery-state.is-complete{background:#eef2f6;color:#4d6173}.thrs-recovery-state.is-locked{background:#fff4e8;color:#9a6425}.thrs-recovery-actions{display:flex;gap:6px}.thrs-recovery-actions button.is-undo,.thrs-recovery-drawer-undo,.thrs-recovery-modal-actions .is-primary{border-color:#176b4c;background:#176b4c;color:#fff}.thrs-recovery-empty{padding:32px!important;text-align:center}.thrs-recovery-pagination{display:flex;align-items:center;justify-content:space-between;padding:11px 14px;background:#fbfcfd;color:#71859a;font-size:10px}.thrs-recovery-pagination div{display:flex;gap:7px}.thrs-recovery-pagination button:disabled{opacity:.45;cursor:not-allowed}.thrs-recovery-backdrop{position:fixed;inset:0;z-index:1250;display:flex;align-items:center;justify-content:flex-end;background:rgba(5,23,39,.38);backdrop-filter:blur(2px)}.thrs-recovery-drawer{width:min(620px,92vw);height:100%;overflow:auto;padding:22px;background:#f7f9fb;box-shadow:-18px 0 50px rgba(5,30,52,.18)}.thrs-recovery-drawer-head{display:flex;justify-content:space-between;gap:16px;padding-bottom:16px;border-bottom:1px solid #dde6ee}.thrs-recovery-drawer-head>button{width:34px;height:34px;border:1px solid #d7e1e9;border-radius:10px;background:#fff;font-size:21px}.thrs-recovery-detail-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px;margin:15px 0}.thrs-recovery-detail-grid>div{padding:11px;border:1px solid #e0e8ef;border-radius:11px;background:#fff}.thrs-recovery-detail-grid span{display:block;color:#7c8e9e;font-size:9px;font-weight:900;text-transform:uppercase}.thrs-recovery-detail-grid strong{display:block;margin-top:4px;font-size:11px;overflow-wrap:anywhere}.thrs-recovery-json{max-height:340px;overflow:auto;padding:12px;border-radius:12px;background:#0d2235;color:#d7e5ef;font:10px/1.55 ui-monospace,SFMono-Regular,Menlo,monospace;white-space:pre-wrap}.thrs-recovery-drawer-undo{width:100%;margin-top:12px}.thrs-recovery-modal{width:min(520px,92vw);margin:auto;padding:22px;border-radius:17px;background:#fff;box-shadow:0 24px 70px rgba(5,30,52,.24)}.thrs-recovery-modal label{display:grid;gap:6px;margin-top:16px}.thrs-recovery-modal label span{font-size:10px;font-weight:900;color:#60768a}.thrs-recovery-modal textarea{min-height:100px;padding:10px;border:1px solid #dbe4ec;border-radius:10px;resize:vertical}.thrs-recovery-modal-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:14px}.thrs-recovery-modal-actions button:disabled{opacity:.55}.thrs-recovery-backdrop:has(.thrs-recovery-modal){justify-content:center}.thrs-recovery-center button:focus-visible,.thrs-recovery-center input:focus-visible,.thrs-recovery-center textarea:focus-visible{outline:3px solid rgba(23,107,76,.18);outline-offset:1px}
++@media(max-width:900px){.thrs-recovery-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}.thrs-recovery-toolbar{align-items:flex-start;flex-direction:column}.thrs-recovery-filter{width:100%}.thrs-recovery-filter input{flex:1;width:auto}}
++@media(max-width:620px){.thrs-recovery-hero{align-items:flex-start;flex-direction:column}.thrs-recovery-kpis{grid-template-columns:1fr 1fr}.thrs-recovery-note{align-items:flex-start;flex-direction:column}.thrs-recovery-detail-grid{grid-template-columns:1fr}.thrs-recovery-drawer{width:100vw}.thrs-recovery-filter{flex-direction:column}.thrs-recovery-filter input,.thrs-recovery-filter button{width:100%}}
++@media(max-width:420px){.thrs-recovery-kpis{grid-template-columns:1fr}.thrs-recovery-modal-actions{flex-direction:column}.thrs-recovery-modal-actions button{width:100%}}
