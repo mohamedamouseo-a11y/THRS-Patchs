@@ -1,0 +1,628 @@
+diff --git a/backend/prisma/schema.prisma b/backend/prisma/schema.prisma
+--- a/backend/prisma/schema.prisma
++++ b/backend/prisma/schema.prisma
+@@ -1347 +1347 @@ model RecoveryRecord {
+-  status         String   @default(COMPLETED)
++  status         String   @default("COMPLETED")
+@@ -1367,2 +1367,39 @@ model RecoveryRecord {
+-  @@map(recovery_records)
++  @@map("recovery_records")
+ }
++
++model GovernanceAction {
++  id               String @id @default(uuid())
++  actionType       String
++  status           String @default("PENDING")
++  module           String @default("SYSTEM_GOVERNANCE")
++  entityType       String?
++  entityId         String?
++  targetAuditId    String?
++  targetDeletionId String?
++  reason           String
++
++  requestedById    String?
++  requestedByName  String?
++  requestedByEmail String?
++  requestedByRole  String?
++  requestedAt      DateTime @default(now())
++
++  reviewedById    String?
++  reviewedByName  String?
++  reviewedByEmail String?
++  reviewedByRole  String?
++  reviewedAt      DateTime?
++  reviewNote      String?
++
++  executionResult Json?
++  metadata        Json?
++  createdAt       DateTime @default(now())
++  updatedAt       DateTime @updatedAt
++
++  @@index([status, createdAt])
++  @@index([actionType, status])
++  @@index([targetAuditId])
++  @@index([targetDeletionId])
++  @@index([requestedById, createdAt])
++  @@map("governance_actions")
++}
+diff --git a/backend/prisma/migrations/20260829000400_central_governance_approval/migration.sql b/backend/prisma/migrations/20260829000400_central_governance_approval/migration.sql
+new file mode 100644
+--- /dev/null
++++ b/backend/prisma/migrations/20260829000400_central_governance_approval/migration.sql
+@@ -0,0 +1,36 @@
++-- THRS Central Governance & Approval — Phase 4
++-- Sensitive actions are queued and executed only after explicit approval.
++
++CREATE TABLE "governance_actions" (
++  "id" TEXT NOT NULL,
++  "actionType" TEXT NOT NULL,
++  "status" TEXT NOT NULL DEFAULT 'PENDING',
++  "module" TEXT NOT NULL DEFAULT 'SYSTEM_GOVERNANCE',
++  "entityType" TEXT,
++  "entityId" TEXT,
++  "targetAuditId" TEXT,
++  "targetDeletionId" TEXT,
++  "reason" TEXT NOT NULL,
++  "requestedById" TEXT,
++  "requestedByName" TEXT,
++  "requestedByEmail" TEXT,
++  "requestedByRole" TEXT,
++  "requestedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
++  "reviewedById" TEXT,
++  "reviewedByName" TEXT,
++  "reviewedByEmail" TEXT,
++  "reviewedByRole" TEXT,
++  "reviewedAt" TIMESTAMP(3),
++  "reviewNote" TEXT,
++  "executionResult" JSONB,
++  "metadata" JSONB,
++  "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
++  "updatedAt" TIMESTAMP(3) NOT NULL,
++  CONSTRAINT "governance_actions_pkey" PRIMARY KEY ("id")
++);
++
++CREATE INDEX "governance_actions_status_createdAt_idx" ON "governance_actions"("status", "createdAt");
++CREATE INDEX "governance_actions_actionType_status_idx" ON "governance_actions"("actionType", "status");
++CREATE INDEX "governance_actions_targetAuditId_idx" ON "governance_actions"("targetAuditId");
++CREATE INDEX "governance_actions_targetDeletionId_idx" ON "governance_actions"("targetDeletionId");
++CREATE INDEX "governance_actions_requestedById_createdAt_idx" ON "governance_actions"("requestedById", "createdAt");
+diff --git a/backend/src/services/governance.service.js b/backend/src/services/governance.service.js
+new file mode 100644
+--- /dev/null
++++ b/backend/src/services/governance.service.js
+@@ -0,0 +1,230 @@
++'use strict';
++
++const prisma = require('../config/database');
++const {
++  actorSnapshot,
++  clientIp,
++  recordAuditEvent,
++  sanitizeForAudit,
++} = require('./audit.service');
++const { getRecoveryStatus, undoAuditEvent } = require('./recovery.service');
++const { reviewDeletion } = require('./deletion.service');
++
++const ACTION_UNDO = 'UNDO_AUDIT';
++const ACTION_CONFIRM_DELETE = 'CONFIRM_DELETE';
++const SUPPORTED_ACTIONS = [ACTION_UNDO, ACTION_CONFIRM_DELETE];
++
++function httpError(statusCode, message, code) {
++  const error = new Error(message);
++  error.statusCode = statusCode;
++  error.code = code || 'GOVERNANCE_ERROR';
++  return error;
++}
++
++function requiredReason(value, label = 'Reason') {
++  const text = String(value || '').trim();
++  if (text.length < 3) throw httpError(400, `${label} is required.`, 'GOVERNANCE_REASON_REQUIRED');
++  return text.slice(0, 1000);
++}
++
++async function validateTarget(actionType, targetId) {
++  if (actionType === ACTION_UNDO) {
++    const status = await getRecoveryStatus(targetId);
++    if (!status.available) {
++      throw httpError(409, `Undo is not available: ${status.reason || 'not recoverable'}`, 'UNDO_NOT_AVAILABLE');
++    }
++    return {
++      module: status.event.module || 'SYSTEM_GOVERNANCE',
++      entityType: status.event.entity || null,
++      entityId: status.event.entityId || null,
++      targetAuditId: status.event.id,
++      targetDeletionId: null,
++      metadata: { originalAction: status.event.action },
++    };
++  }
++
++  const deletion = await prisma.deletionRecord.findUnique({ where: { id: String(targetId) } });
++  if (!deletion) throw httpError(404, 'Deletion record not found.', 'DELETION_RECORD_NOT_FOUND');
++  if (!deletion.isActive || deletion.status === 'CONFIRMED') {
++    throw httpError(409, 'Deletion record is not pending confirmation.', 'DELETE_CONFIRM_NOT_AVAILABLE');
++  }
++  return {
++    module: deletion.module || 'SYSTEM_GOVERNANCE',
++    entityType: deletion.entityType || null,
++    entityId: deletion.entityId || null,
++    targetAuditId: null,
++    targetDeletionId: deletion.id,
++    metadata: { deletionStatus: deletion.status },
++  };
++}
++
++async function requestGovernanceAction(req, input = {}) {
++  const actionType = String(input.actionType || '').trim().toUpperCase();
++  if (!SUPPORTED_ACTIONS.includes(actionType)) {
++    throw httpError(400, 'Unsupported governance action.', 'GOVERNANCE_ACTION_UNSUPPORTED');
++  }
++
++  const reason = requiredReason(input.reason, 'Governance reason');
++  const targetId = String(
++    actionType === ACTION_UNDO ? input.targetAuditId : input.targetDeletionId
++  ).trim();
++  if (!targetId) throw httpError(400, 'Governance target is required.', 'GOVERNANCE_TARGET_REQUIRED');
++
++  const target = await validateTarget(actionType, targetId);
++  const duplicateWhere = {
++    actionType,
++    status: 'PENDING',
++    ...(actionType === ACTION_UNDO
++      ? { targetAuditId: target.targetAuditId }
++      : { targetDeletionId: target.targetDeletionId }),
++  };
++  const existing = await prisma.governanceAction.findFirst({ where: duplicateWhere });
++  if (existing) return { request: existing, alreadyPending: true };
++
++  const actor = actorSnapshot(req);
++  const request = await prisma.governanceAction.create({
++    data: {
++      actionType,
++      status: 'PENDING',
++      module: target.module,
++      entityType: target.entityType,
++      entityId: target.entityId ? String(target.entityId) : null,
++      targetAuditId: target.targetAuditId,
++      targetDeletionId: target.targetDeletionId,
++      reason,
++      requestedById: actor.userId || null,
++      requestedByName: actor.actorName || null,
++      requestedByEmail: actor.actorEmail || null,
++      requestedByRole: actor.actorRole || null,
++      metadata: sanitizeForAudit(target.metadata),
++    },
++  });
++
++  await recordAuditEvent({
++    ...actor,
++    action: 'GOVERNANCE_REQUEST',
++    module: 'SYSTEM_GOVERNANCE',
++    entity: 'GOVERNANCE_ACTION',
++    entityId: request.id,
++    summary: `Requested ${actionType}`,
++    afterState: { status: request.status, actionType, targetId },
++    metadata: { reason, targetAuditId: target.targetAuditId, targetDeletionId: target.targetDeletionId },
++    requestId: req.auditRequestId || null,
++    method: req.method || 'POST',
++    route: req.originalUrl || null,
++    outcome: 'SUCCESS',
++    statusCode: 202,
++    source: actor.source || 'WEB',
++    reversible: false,
++    ipAddress: clientIp(req),
++    userAgent: req.get?.('user-agent') || null,
++  });
++
++  return { request, alreadyPending: false };
++}
++
++async function listGovernanceActions(query = {}) {
++  const page = Math.max(1, Number.parseInt(query.page, 10) || 1);
++  const pageSize = Math.min(100, Math.max(10, Number.parseInt(query.pageSize, 10) || 25));
++  const where = {};
++  if (query.status) where.status = String(query.status).trim().toUpperCase();
++  if (query.actionType) where.actionType = String(query.actionType).trim().toUpperCase();
++  const [total, requests] = await Promise.all([
++    prisma.governanceAction.count({ where }),
++    prisma.governanceAction.findMany({
++      where,
++      orderBy: { createdAt: 'desc' },
++      skip: (page - 1) * pageSize,
++      take: pageSize,
++    }),
++  ]);
++  return {
++    requests,
++    pagination: { page, pageSize, total, pages: Math.max(1, Math.ceil(total / pageSize)) },
++  };
++}
++
++async function getGovernanceSummary() {
++  const [pending, approved, rejected, total] = await Promise.all([
++    prisma.governanceAction.count({ where: { status: 'PENDING' } }),
++    prisma.governanceAction.count({ where: { status: 'APPROVED' } }),
++    prisma.governanceAction.count({ where: { status: 'REJECTED' } }),
++    prisma.governanceAction.count(),
++  ]);
++  return { pending, approved, rejected, total };
++}
++
++async function reviewGovernanceAction(req, id, decision, note) {
++  const request = await prisma.governanceAction.findUnique({ where: { id: String(id) } });
++  if (!request) throw httpError(404, 'Governance request not found.', 'GOVERNANCE_REQUEST_NOT_FOUND');
++  if (request.status !== 'PENDING') {
++    throw httpError(409, 'Governance request was already reviewed.', 'GOVERNANCE_ALREADY_REVIEWED');
++  }
++
++  const normalizedDecision = String(decision || '').trim().toUpperCase();
++  if (!['APPROVE', 'REJECT'].includes(normalizedDecision)) {
++    throw httpError(400, 'Invalid governance decision.', 'GOVERNANCE_DECISION_INVALID');
++  }
++  const reviewNote = requiredReason(note, 'Review note');
++  const actor = actorSnapshot(req);
++
++  let result = null;
++  if (normalizedDecision === 'APPROVE') {
++    if (request.actionType === ACTION_UNDO) {
++      result = await undoAuditEvent(req, request.targetAuditId, `Governance approval: ${reviewNote}. Request reason: ${request.reason}`);
++    } else if (request.actionType === ACTION_CONFIRM_DELETE) {
++      result = await reviewDeletion(req, request.targetDeletionId, 'CONFIRM', reviewNote);
++    } else {
++      throw httpError(409, 'Action is no longer supported.', 'GOVERNANCE_ACTION_UNSUPPORTED');
++    }
++  }
++
++  const reviewed = await prisma.governanceAction.update({
++    where: { id: request.id },
++    data: {
++      status: normalizedDecision === 'APPROVE' ? 'APPROVED' : 'REJECTED',
++      reviewedById: actor.userId || null,
++      reviewedByName: actor.actorName || null,
++      reviewedByEmail: actor.actorEmail || null,
++      reviewedByRole: actor.actorRole || null,
++      reviewedAt: new Date(),
++      reviewNote,
++      executionResult: result ? sanitizeForAudit(result) : null,
++    },
++  });
++
++  await recordAuditEvent({
++    ...actor,
++    action: normalizedDecision === 'APPROVE' ? 'GOVERNANCE_APPROVE' : 'GOVERNANCE_REJECT',
++    module: 'SYSTEM_GOVERNANCE',
++    entity: 'GOVERNANCE_ACTION',
++    entityId: request.id,
++    summary: `${normalizedDecision} ${request.actionType}`,
++    beforeState: { status: request.status },
++    afterState: { status: reviewed.status },
++    metadata: { reviewNote, targetAuditId: request.targetAuditId, targetDeletionId: request.targetDeletionId },
++    requestId: req.auditRequestId || null,
++    method: req.method || 'POST',
++    route: req.originalUrl || null,
++    outcome: 'SUCCESS',
++    statusCode: 200,
++    source: actor.source || 'WEB',
++    reversible: false,
++    ipAddress: clientIp(req),
++    userAgent: req.get?.('user-agent') || null,
++  });
++
++  return { request: reviewed, result };
++}
++
++module.exports = {
++  SUPPORTED_ACTIONS,
++  requestGovernanceAction,
++  listGovernanceActions,
++  getGovernanceSummary,
++  reviewGovernanceAction,
++};
+diff --git a/backend/src/controllers/governance.controller.js b/backend/src/controllers/governance.controller.js
+new file mode 100644
+--- /dev/null
++++ b/backend/src/controllers/governance.controller.js
+@@ -0,0 +1,51 @@
++'use strict';
++
++const {
++  listGovernanceActions,
++  getGovernanceSummary,
++  reviewGovernanceAction,
++} = require('../services/governance.service');
++
++function sendError(res, error, fallback) {
++  return res.status(error.statusCode || 500).json({
++    success: false,
++    code: error.code || 'GOVERNANCE_ERROR',
++    message: error.message || fallback,
++  });
++}
++
++async function summary(req, res) {
++  try {
++    return res.json({ success: true, data: await getGovernanceSummary() });
++  } catch (error) {
++    return sendError(res, error, 'Failed to load governance summary');
++  }
++}
++
++async function requests(req, res) {
++  try {
++    return res.json({ success: true, data: await listGovernanceActions(req.query) });
++  } catch (error) {
++    return sendError(res, error, 'Failed to load governance requests');
++  }
++}
++
++async function approve(req, res) {
++  try {
++    const data = await reviewGovernanceAction(req, req.params.id, 'APPROVE', req.body?.note);
++    return res.json({ success: true, message: 'Governance request approved and executed.', data });
++  } catch (error) {
++    return sendError(res, error, 'Failed to approve governance request');
++  }
++}
++
++async function reject(req, res) {
++  try {
++    const data = await reviewGovernanceAction(req, req.params.id, 'REJECT', req.body?.note);
++    return res.json({ success: true, message: 'Governance request rejected.', data });
++  } catch (error) {
++    return sendError(res, error, 'Failed to reject governance request');
++  }
++}
++
++module.exports = { summary, requests, approve, reject };
+diff --git a/backend/src/routes/governance.routes.js b/backend/src/routes/governance.routes.js
+new file mode 100644
+--- /dev/null
++++ b/backend/src/routes/governance.routes.js
+@@ -0,0 +1,26 @@
++'use strict';
++
++const express = require('express');
++const router = express.Router();
++const authMiddleware = require('../middleware/auth.middleware');
++const governanceController = require('../controllers/governance.controller');
++const { isReservedSuperAdmin } = require('../utils/superAdmin');
++
++function primarySuperAdminOnly(req, res, next) {
++  if (req.user?.role !== 'SUPER_ADMIN' || !isReservedSuperAdmin(req.user)) {
++    return res.status(403).json({
++      success: false,
++      message: 'Pending Actions is limited to the primary Super Admin.',
++    });
++  }
++  return next();
++}
++
++router.use(authMiddleware);
++router.use(primarySuperAdminOnly);
++router.get('/summary', governanceController.summary);
++router.get('/requests', governanceController.requests);
++router.post('/requests/:id/approve', governanceController.approve);
++router.post('/requests/:id/reject', governanceController.reject);
++
++module.exports = router;
+diff --git a/backend/src/controllers/recovery.controller.js b/backend/src/controllers/recovery.controller.js
+--- a/backend/src/controllers/recovery.controller.js
++++ b/backend/src/controllers/recovery.controller.js
+@@ -7,0 +8 @@ const {
++const { requestGovernanceAction } = require('../services/governance.service');
+@@ -45,5 +46,12 @@ async function undo(req, res) {
+-    const result = await undoAuditEvent(req, req.params.auditId, req.body?.note);
+-    return res.json({
++    const result = await requestGovernanceAction(req, {
++      actionType: 'UNDO_AUDIT',
++      targetAuditId: req.params.auditId,
++      reason: req.body?.note,
++    });
++    return res.status(result.alreadyPending ? 200 : 202).json({
+       success: true,
+-      message: 'Action undone. The original audit event was preserved and a reversal event was added.',
++      message: result.alreadyPending
++        ? 'Undo request is already pending approval.'
++        : 'Undo request submitted for Super Admin approval.',
+       data: result,
+diff --git a/backend/src/controllers/deletion.controller.js b/backend/src/controllers/deletion.controller.js
+--- a/backend/src/controllers/deletion.controller.js
++++ b/backend/src/controllers/deletion.controller.js
+@@ -4,0 +5 @@ const { reviewDeletion } = require('../services/deletion.service');
++const { requestGovernanceAction } = require('../services/governance.service');
+@@ -113,2 +114,9 @@ async function confirmRecord(req, res) {
+-    const record = await reviewDeletion(req, req.params.id, 'CONFIRM', req.body?.note);
+-    return res.json({ success: true, message: 'Soft deletion confirmed by Super Admin.', data: record });
++    const result = await requestGovernanceAction(req, {
++      actionType: 'CONFIRM_DELETE',
++      targetDeletionId: req.params.id,
++      reason: req.body?.note,
++    });
++    return res.status(result.alreadyPending ? 200 : 202).json({
++      success: true, message: result.alreadyPending ? 'Confirmation is already pending approval.' : 'Deletion confirmation submitted for approval.', data: result,
++    });
+diff --git a/backend/src/app.js b/backend/src/app.js
+--- a/backend/src/app.js
++++ b/backend/src/app.js
+@@ -81,0 +82 @@ app.use('/api/v1/recovery', require('./routes/recovery.routes'));
++app.use('/api/v1/governance', require('./routes/governance.routes'));
+diff --git a/backend/src/middleware/audit.middleware.js b/backend/src/middleware/audit.middleware.js
+--- a/backend/src/middleware/audit.middleware.js
++++ b/backend/src/middleware/audit.middleware.js
+@@ -19,0 +20 @@ function centralAuditMiddleware(req, res, next) {
++  if (String(req.originalUrl || '').startsWith('/api/v1/governance')) return next();
+diff --git a/frontend/src/App.jsx b/frontend/src/App.jsx
+--- a/frontend/src/App.jsx
++++ b/frontend/src/App.jsx
+@@ -72,0 +73,2 @@ const AuditCenter = lazy(() => import('./pages/AuditCenter'));
++const RecoveryCenter = lazy(() => import('./pages/RecoveryCenter'));
++const PendingActions = lazy(() => import('./pages/PendingActions'));
+@@ -223,0 +226,2 @@
++      <Route path="/recovery-center" element={<ReservedSuperAdminRoute><RecoveryCenter /></ReservedSuperAdminRoute>} />
++      <Route path="/pending-actions" element={<ReservedSuperAdminRoute><PendingActions /></ReservedSuperAdminRoute>} />
+diff --git a/frontend/src/components/Layout/Sidebar.jsx b/frontend/src/components/Layout/Sidebar.jsx
+--- a/frontend/src/components/Layout/Sidebar.jsx
++++ b/frontend/src/components/Layout/Sidebar.jsx
+@@ -176,0 +177,2 @@
++      { path: '/recovery-center', label: 'Recovery Center', icon: '↩️', roles: ['SUPER_ADMIN'], reservedOnly: true },
++      { path: '/pending-actions', label: 'Pending Actions', icon: '⏳', roles: ['SUPER_ADMIN'], reservedOnly: true },
+@@ -204 +207,2 @@
+-      return roleAllowed && emailAllowed;
++      const reservedAllowed = !item.reservedOnly || isAllowedAgentSuperAdmin(user);
++      return roleAllowed && emailAllowed && reservedAllowed;
+diff --git a/frontend/src/pages/RecoveryCenter.jsx b/frontend/src/pages/RecoveryCenter.jsx
+--- a/frontend/src/pages/RecoveryCenter.jsx
++++ b/frontend/src/pages/RecoveryCenter.jsx
+@@ -70,2 +70,2 @@
+-      await api.post(`/recovery/events/${undoTarget.id}/undo`, { note: note.trim() || undefined });
+-      setNotice('Recovery completed. The source record is visible again and the original audit event was preserved.');
++      const response = await api.post(`/recovery/events/${undoTarget.id}/undo`, { note: note.trim() || undefined });
++      setNotice(response?.data?.message || 'Undo request submitted for approval.');
+@@ -91 +91 @@
+-          <span className="thrs-recovery-eyebrow">SYSTEM GOVERNANCE · PHASE 3A</span>
++          <span className="thrs-recovery-eyebrow">SYSTEM GOVERNANCE · PHASE 4</span>
+@@ -94 +94 @@
+-        <span className="thrs-recovery-badge">UNDO ENGINE ACTIVE</span>
++        <span className="thrs-recovery-badge">APPROVAL GATE ACTIVE</span>
+@@ -187 +187 @@
+-            <h2>Undo {prettyToken(undoTarget.action)}?</h2>
++            <h2>Request Undo for {prettyToken(undoTarget.action)}?</h2>
+@@ -188 +188 @@
+-            <p>The original audit event will remain unchanged. THRS will restore the hidden source record and create a new UNDO event referencing it.</p>
++            <p>The action will not execute immediately. It will enter Pending Actions for explicit approval.</p>
+@@ -189 +189 @@
+-            <label><span>Recovery note · optional</span><textarea value={note} onChange={(event) => setNote(event.target.value)} maxLength={1000} placeholder="Reason or governance note…" /></label>
++            <label><span>Governance reason · required</span><textarea value={note} onChange={(event) => setNote(event.target.value)} maxLength={1000} placeholder="Why should this action be reversed?" /></label>
+@@ -193 +193 @@
+-              <button type="button" className="is-primary" disabled={submitting} onClick={submitUndo}>{submitting ? 'Reversing…' : 'Confirm Undo'}</button>
++              <button type="button" className="is-primary" disabled={submitting || note.trim().length < 3} onClick={submitUndo}>{submitting ? 'Submitting…' : 'Submit Undo Request'}</button>
+diff --git a/frontend/src/pages/DeletionCenter.jsx b/frontend/src/pages/DeletionCenter.jsx
+--- a/frontend/src/pages/DeletionCenter.jsx
++++ b/frontend/src/pages/DeletionCenter.jsx
+@@ -365 +365 @@
+-                          Confirm
++                          Request Confirm
+@@ -439 +439 @@
+-                    Confirm soft delete
++                    Request confirmation
+@@ -484 +484 @@
+-              <span>Review note</span>
++              <span>{review.mode === 'restore' ? 'Review note' : 'Governance reason · required'}</span>
+@@ -488 +488 @@
+-                placeholder="Optional governance note..."
++                placeholder={review.mode === 'restore' ? 'Optional governance note...' : 'Why should this deletion be confirmed?'}
+@@ -496 +496 @@
+-                disabled={submitting}
++                disabled={submitting || (review.mode === 'confirm' && reviewNote.trim().length < 3)}
+@@ -500 +500 @@
+-                {submitting ? 'Processing…' : review.mode === 'restore' ? 'Restore original record' : 'Confirm soft delete'}
++                {submitting ? 'Processing…' : review.mode === 'restore' ? 'Restore original record' : 'Submit confirmation request'}
+diff --git a/frontend/src/pages/PendingActions.jsx b/frontend/src/pages/PendingActions.jsx
+new file mode 100644
+--- /dev/null
++++ b/frontend/src/pages/PendingActions.jsx
+@@ -0,0 +1,116 @@
++import React, { useCallback, useEffect, useState } from 'react';
++import api from '../services/api';
++import '../styles/thrs-pending-actions.css';
++
++function pretty(value) {
++  return String(value || '—').replace(/_/g, ' ').toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase());
++}
++
++function when(value) {
++  if (!value) return '—';
++  const date = new Date(value);
++  return Number.isNaN(date.getTime()) ? '—' : date.toLocaleString();
++}
++
++const PendingActions = () => {
++  const [summary, setSummary] = useState({ pending: 0, approved: 0, rejected: 0, total: 0 });
++  const [requests, setRequests] = useState([]);
++  const [pagination, setPagination] = useState({ page: 1, pageSize: 25, total: 0, pages: 1 });
++  const [status, setStatus] = useState('PENDING');
++  const [review, setReview] = useState(null);
++  const [note, setNote] = useState('');
++  const [loading, setLoading] = useState(true);
++  const [submitting, setSubmitting] = useState(false);
++  const [message, setMessage] = useState('');
++  const [error, setError] = useState('');
++
++  const loadSummary = useCallback(async () => {
++    const response = await api.get('/governance/summary');
++    setSummary(response?.data?.data || {});
++  }, []);
++
++  const load = useCallback(async (page = 1) => {
++    setLoading(true);
++    setError('');
++    try {
++      const response = await api.get('/governance/requests', { params: { page, pageSize: 25, status: status || undefined } });
++      setRequests(response?.data?.data?.requests || []);
++      setPagination(response?.data?.data?.pagination || { page, pageSize: 25, total: 0, pages: 1 });
++    } catch (requestError) {
++      setError(requestError?.response?.data?.message || requestError?.message || 'Failed to load pending actions.');
++    } finally {
++      setLoading(false);
++    }
++  }, [status]);
++
++  useEffect(() => { loadSummary(); }, [loadSummary]);
++  useEffect(() => { load(1); }, [load]);
++
++  const decide = async () => {
++    if (!review || note.trim().length < 3 || submitting) return;
++    setSubmitting(true);
++    setError('');
++    try {
++      const endpoint = `/governance/requests/${review.request.id}/${review.decision === 'APPROVE' ? 'approve' : 'reject'}`;
++      const response = await api.post(endpoint, { note: note.trim() });
++      setMessage(response?.data?.message || 'Governance request reviewed.');
++      setReview(null);
++      setNote('');
++      await Promise.all([loadSummary(), load(pagination.page)]);
++    } catch (requestError) {
++      setError(requestError?.response?.data?.message || requestError?.message || 'Governance review failed.');
++    } finally {
++      setSubmitting(false);
++    }
++  };
++
++  return (
++    <div className="thrs-pending-actions">
++      <header className="thrs-pending-hero">
++        <div><span>THRS GOVERNANCE · PHASE 4</span><h1>Pending Actions</h1><p>Explicit approval gate for sensitive delete confirmations and Undo operations.</p></div>
++        <strong>PRIMARY SUPER ADMIN</strong>
++      </header>
++
++      <section className="thrs-pending-kpis">
++        <article><span>Pending</span><b>{summary.pending || 0}</b></article>
++        <article><span>Approved</span><b>{summary.approved || 0}</b></article>
++        <article><span>Rejected</span><b>{summary.rejected || 0}</b></article>
++        <article><span>Total</span><b>{summary.total || 0}</b></article>
++      </section>
++
++      <div className="thrs-pending-toolbar"><select value={status} onChange={(event) => setStatus(event.target.value)}><option value="PENDING">Pending</option><option value="APPROVED">Approved</option><option value="REJECTED">Rejected</option><option value="">All</option></select></div>
++      {message && <div className="thrs-pending-message">{message}</div>}
++      {error && <div className="thrs-pending-error">{error}</div>}
++
++      <section className="thrs-pending-card">
++        <table><thead><tr><th>Requested</th><th>Action</th><th>Target</th><th>Requester</th><th>Reason</th><th>Status</th><th /></tr></thead><tbody>
++          {loading && <tr><td colSpan="7">Loading…</td></tr>}
++          {!loading && !requests.length && <tr><td colSpan="7">No governance requests.</td></tr>}
++          {!loading && requests.map((item) => <tr key={item.id}><td>{when(item.requestedAt)}</td><td><strong>{pretty(item.actionType)}</strong><small>{pretty(item.module)}</small></td><td><strong>{pretty(item.entityType)}</strong><small>{String(item.entityId || item.targetAuditId || item.targetDeletionId || '—').slice(0, 18)}</small></td><td><strong>{item.requestedByName || item.requestedByEmail || 'System actor'}</strong><small>{pretty(item.requestedByRole)}</small></td><td>{item.reason}</td><td><span className={`is-${String(item.status).toLowerCase()}`}>{pretty(item.status)}</span></td><td>{item.status === 'PENDING' && <div className="thrs-pending-actions"><button onClick={() => { setReview({ request: item, decision: 'REJECT' }); setNote(''); }}>Reject</button><button className="is-approve" onClick={() => { setReview({ request: item, decision: 'APPROVE' }); setNote(''); }}>Approve</button></div>}</td></tr>)}
++        </tbody></table>
++        <footer><span>Page {pagination.page} of {pagination.pages}</span><div><button disabled={pagination.page <= 1} onClick={() => load(pagination.page - 1)}>Previous</button><button disabled={pagination.page >= pagination.pages} onClick={() => load(pagination.page + 1)}>Next</button></div></footer>
++      </section>
++
++      {review && <div className="thrs-pending-backdrop"><div className="thrs-pending-modal"><span>GOVERNANCE DECISION</span><h2>{review.decision === 'APPROVE' ? 'Approve and execute?' : 'Reject request?'}</h2><p>{pretty(review.request.actionType)} · {review.request.reason}</p><textarea value={note} onChange={(event) => setNote(event.target.value)} maxLength={1000} placeholder="Mandatory review note..." /><div><button disabled={submitting} onClick={() => setReview(null)}>Cancel</button><button className={review.decision === 'APPROVE' ? 'is-approve' : ''} disabled={submitting || note.trim().length < 3} onClick={decide}>{submitting ? 'Processing…' : review.decision === 'APPROVE' ? 'Approve & Execute' : 'Reject'}</button></div></div></div>}
++    </div>
++  );
++};
++
++export default PendingActions;
+diff --git a/frontend/src/styles/thrs-pending-actions.css b/frontend/src/styles/thrs-pending-actions.css
+new file mode 100644
+--- /dev/null
++++ b/frontend/src/styles/thrs-pending-actions.css
+@@ -0,0 +1 @@
++.thrs-pending-actions{padding:28px;max-width:1500px;margin:auto}.thrs-pending-hero,.thrs-pending-card,.thrs-pending-kpis article,.thrs-pending-toolbar{background:#fff;border:1px solid #e6e8ee;border-radius:16px}.thrs-pending-hero{padding:24px;display:flex;justify-content:space-between;gap:20px}.thrs-pending-hero h1{margin:5px 0}.thrs-pending-kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin:18px 0}.thrs-pending-kpis article{padding:18px}.thrs-pending-kpis b{display:block;font-size:30px;margin-top:6px}.thrs-pending-toolbar{padding:12px;margin-bottom:14px}.thrs-pending-toolbar select{padding:9px 12px}.thrs-pending-card{overflow:auto}.thrs-pending-card table{width:100%;border-collapse:collapse}.thrs-pending-card th,.thrs-pending-card td{padding:14px;border-bottom:1px solid #eef0f4;text-align:left;vertical-align:top}.thrs-pending-card small{display:block;color:#697386;margin-top:4px}.thrs-pending-card footer{padding:14px;display:flex;justify-content:space-between}.thrs-pending-actions{display:flex;gap:7px}.thrs-pending-actions button,.thrs-pending-card button,.thrs-pending-modal button{padding:8px 12px;border:1px solid #ccd1da;border-radius:9px;background:#fff;cursor:pointer}.thrs-pending-actions .is-approve,.thrs-pending-modal .is-approve{background:#0f6b4f;color:#fff;border-color:#0f6b4f}.thrs-pending-message{padding:12px;background:#eaf8f1;border-radius:10px;margin-bottom:12px}.thrs-pending-error{padding:12px;background:#fff0f0;border-radius:10px;margin-bottom:12px}.thrs-pending-backdrop{position:fixed;inset:0;background:#0b163099;display:grid;place-items:center;z-index:1000}.thrs-pending-modal{background:#fff;border-radius:16px;padding:24px;width:min(540px,92vw)}.thrs-pending-modal textarea{width:100%;min-height:110px;margin:14px 0;padding:10px}.thrs-pending-modal>div{display:flex;justify-content:flex-end;gap:8px}@media(max-width:800px){.thrs-pending-kpis{grid-template-columns:repeat(2,1fr)}.thrs-pending-actions{padding:14px}.thrs-pending-hero{flex-direction:column}}
