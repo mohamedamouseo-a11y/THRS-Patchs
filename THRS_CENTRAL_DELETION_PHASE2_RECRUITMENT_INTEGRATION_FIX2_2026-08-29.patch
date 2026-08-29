@@ -1,0 +1,150 @@
+diff --git a/backend/src/controllers/recruitment.controller.js b/backend/src/controllers/recruitment.controller.js
+--- a/backend/src/controllers/recruitment.controller.js
++++ b/backend/src/controllers/recruitment.controller.js
+@@ -62,7 +62,10 @@ exports.getAllJobs = async (req, res, next) => {
+         orderBy: { postedAt: 'desc' }
+       }),
+       prisma.application.findMany({
+-        where: { targetPosition: { not: null } },
++        where: {
++          targetPosition: { not: null },
++          ...(deletedApplicationIds.length ? { id: { notIn: deletedApplicationIds } } : {})
++        },
+         select: { targetPosition: true },
+         distinct: ['targetPosition']
+       })
+@@ -89,6 +92,8 @@ exports.updateJob = async (req, res, next) => {
+   try {
+     const { id } = req.params;
+     const data = sanitizeJobPayload(req.body, { partial: true });
++    await assertEntityVisible('JOB', id);
++    const deletedApplicationIds = await getActiveDeletionIds('APPLICATION');
+ 
+     if (Object.keys(data).length === 0) {
+       return res.status(400).json({ success: false, message: 'No valid job fields to update' });
+@@ -127,8 +132,15 @@ exports.deleteJob = async (req, res, next) => {
+       });
+     }
+ 
+-    await prisma.job.delete({ where: { id } });
+-    res.json({ success: true, message: 'Job deleted' });
++    const { record, alreadyDeleted } = await requestSoftDelete(req, 'JOB', id, req.body?.reason);
++    return res.status(alreadyDeleted ? 200 : 202).json({
++      success: true,
++      message: alreadyDeleted
++        ? 'Job is already in the Recycle Bin.'
++        : 'Job moved to the Recycle Bin pending Super Admin review.',
++      deletion: record,
++    });
+   } catch (error) {
+     next(error);
+   }
+@@ -139,8 +151,10 @@ exports.deleteJob = async (req, res, next) => {
+ // Get public job board
+ exports.getPublicJobs = async (req, res, next) => {
+   try {
++    const deletedJobIds = await getActiveDeletionIds('JOB');
+     const jobs = await prisma.job.findMany({
+-      where: { status: 'OPEN' },
++      where: { status: 'OPEN', ...(deletedJobIds.length ? { id: { notIn: deletedJobIds } } : {}) },
+       orderBy: { postedAt: 'desc' }
+     });
+     res.json({ success: true, jobs });
+@@ -390,8 +404,11 @@ exports.getApplications = async (req, res, next) => {
+       limit = 50
+     } = req.query;
+ 
++    const deletedApplicationIds = await getActiveDeletionIds('APPLICATION');
+     const where = {};
+     const andFilters = [];
++
++    if (deletedApplicationIds.length) where.id = { notIn: deletedApplicationIds };
+ 
+     if (jobId) where.jobId = jobId;
+     if (status) where.status = status;
+@@ -508,6 +525,7 @@ exports.getApplication = async (req, res, next) => {
+ exports.getApplication = async (req, res, next) => {
+   try {
+     const { id } = req.params;
++    await assertEntityVisible('APPLICATION', id);
+     const application = await prisma.application.findUnique({
+       where: { id },
+       include: {
+@@ -532,6 +550,7 @@ exports.updateApplication = async (req, res, next) => {
+ exports.updateApplication = async (req, res, next) => {
+   try {
+     const { id } = req.params;
++    await assertEntityVisible('APPLICATION', id);
+     const updateData = {};
+     
+     // Allow updating these fields (including new ATS fields)
+@@ -570,8 +589,15 @@ exports.deleteApplication = async (req, res, next) => {
+ exports.deleteApplication = async (req, res, next) => {
+   try {
+     const { id } = req.params;
+-    await prisma.application.delete({ where: { id } });
+-    res.json({ success: true, message: 'Application deleted' });
++    const { record, alreadyDeleted } = await requestSoftDelete(req, 'APPLICATION', id, req.body?.reason);
++    return res.status(alreadyDeleted ? 200 : 202).json({
++      success: true,
++      message: alreadyDeleted
++        ? 'Application is already in the Recycle Bin.'
++        : 'Application moved to the Recycle Bin pending Super Admin review.',
++      deletion: record,
++    });
+   } catch (error) {
+     next(error);
+   }
+@@ -582,6 +608,7 @@ exports.updateApplicationStatus = async (req, res, next) => {
+   try {
+     const { id } = req.params;
+     const { status } = req.body;
++    await assertEntityVisible('APPLICATION', id);
+     const application = await prisma.application.update({
+       where: { id },
+       data: { status }
+@@ -594,6 +621,7 @@ exports.updateApplicationStatus = async (req, res, next) => {
+ // Schedule interview
+ exports.scheduleInterview = async (req, res, next) => {
+   try {
++    await assertEntityVisible('APPLICATION', req.body.applicationId);
+     const interview = await prisma.interview.create({ data: req.body });
+     // Update application status
+     await prisma.application.update({
+@@ -610,6 +638,7 @@ exports.scheduleInterview = async (req, res, next) => {
+ // Create assessment
+ exports.createAssessment = async (req, res, next) => {
+   try {
++    await assertEntityVisible('APPLICATION', req.body.applicationId);
+     const assessment = await prisma.assessment.create({ data: req.body });
+     // Update application status
+     await prisma.application.update({
+@@ -626,14 +655,22 @@ exports.createAssessment = async (req, res, next) => {
+ // Stats
+ exports.getStats = async (req, res, next) => {
+   try {
++    const deletedApplicationIds = await getActiveDeletionIds('APPLICATION');
++    const visibleApplications = deletedApplicationIds.length
++      ? { id: { notIn: deletedApplicationIds } }
++      : {};
+     const [totalApplications, hired, rejected, newApplications, interviewScheduled, statusGroups] = await Promise.all([
+-      prisma.application.count(),
+-      prisma.application.count({ where: { status: "HIRED" } }),
+-      prisma.application.count({ where: { status: "REJECTED" } }),
+-      prisma.application.count({ where: { status: "SUBMITTED" } }),
+-      prisma.application.count({ where: { status: "INTERVIEW_SCHEDULED" } }),
++      prisma.application.count({ where: visibleApplications }),
++      prisma.application.count({ where: { ...visibleApplications, status: "HIRED" } }),
++      prisma.application.count({ where: { ...visibleApplications, status: "REJECTED" } }),
++      prisma.application.count({ where: { ...visibleApplications, status: "SUBMITTED" } }),
++      prisma.application.count({ where: { ...visibleApplications, status: "INTERVIEW_SCHEDULED" } }),
+       // Real per-stage counts for the recruitment pipeline UI (all statuses, not just the 4 above).
+-      prisma.application.groupBy({ by: ['status'], _count: { status: true } })
++      prisma.application.groupBy({
++        by: ['status'],
++        where: visibleApplications,
++        _count: { status: true }
++      })
+     ]);
+ 
+     const byStatus = statusGroups.reduce((acc, row) => {
