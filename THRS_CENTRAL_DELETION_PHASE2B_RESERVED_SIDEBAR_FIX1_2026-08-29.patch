@@ -1,0 +1,30 @@
+diff --git a/frontend/src/components/Layout/Sidebar.jsx b/frontend/src/components/Layout/Sidebar.jsx
+--- a/frontend/src/components/Layout/Sidebar.jsx
++++ b/frontend/src/components/Layout/Sidebar.jsx
+@@ -2,6 +2,7 @@
+ import React, { useState } from 'react';
+ import { NavLink } from 'react-router-dom';
+ import { useAuth } from '../../contexts/AuthContext';
++import { isAllowedAgentSuperAdmin } from '../../utils/superAdmin';
+ import LordiconIcon from '../Common/LordiconIcon';
+ 
+ const ALL_ROLES = [
+@@ -133,8 +134,8 @@
+       { path: '/reports', label: 'Reports', icon: '📑', roles: REPORT_ROLES },
+       { path: '/documents', label: 'Documents', icon: '📄', roles: ALL_ROLES },
+-      { path: '/audit-center', label: 'Audit Center', icon: '🛡️', roles: ['SUPER_ADMIN'] },
+-      { path: '/deletion-center', label: 'Recycle Bin', icon: '♻️', roles: ['SUPER_ADMIN'] },
++      { path: '/audit-center', label: 'Audit Center', icon: '🛡️', roles: ['SUPER_ADMIN'], reservedOnly: true },
++      { path: '/deletion-center', label: 'Recycle Bin', icon: '♻️', roles: ['SUPER_ADMIN'], reservedOnly: true },
+       { path: '/settings', label: 'Settings', icon: '⚙️', roles: ['SUPER_ADMIN', 'HR_ADMIN'] },
+     ]
+   },
+@@ -172,7 +173,8 @@
+     items: section.items.filter((item) => {
+       const roleAllowed = item.roles.includes(user?.role);
+       const emailAllowed = !item.emails || item.emails.map((email) => String(email).toLowerCase()).includes(normalizedEmail);
+-      return roleAllowed && emailAllowed;
++      const reservedAllowed = !item.reservedOnly || isAllowedAgentSuperAdmin(user);
++      return roleAllowed && emailAllowed && reservedAllowed;
+     })
+   })).filter((section) => section.items.length > 0);
