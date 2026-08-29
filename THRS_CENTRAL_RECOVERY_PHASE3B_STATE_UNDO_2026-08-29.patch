@@ -1,0 +1,722 @@
+diff --git a/backend/src/services/recovery.action.service.js b/backend/src/services/recovery.action.service.js
+new file mode 100644
+--- /dev/null
++++ b/backend/src/services/recovery.action.service.js
+@@ -0,0 +1,311 @@
++'use strict';
++
++const {
++  clientIp,
++  recordAuditEvent,
++  sanitizeForAudit,
++} = require('./audit.service');
++
++const SUPPORTED_ACTIONS = [
++  'CREATE_JOB',
++  'UPDATE_JOB',
++  'UPDATE_APPLICATION',
++  'STATUS_CHANGE_APPLICATION',
++];
++
++const ACTIONS = {
++  CREATE_JOB: {
++    kind: 'CREATE_COMPENSATION',
++    entity: 'JOB',
++    model: 'job',
++    guardFields: ['updatedAt'],
++    dateFields: ['updatedAt'],
++  },
++  UPDATE_JOB: {
++    kind: 'UPDATE',
++    entity: 'JOB',
++    model: 'job',
++    allowedFields: [
++      'title', 'description', 'requirements', 'location', 'jobType', 'workModel',
++      'salaryRange', 'status', 'positionCode', 'departmentId', 'closedAt',
++    ],
++    dateFields: ['closedAt'],
++  },
++  UPDATE_APPLICATION: {
++    kind: 'UPDATE',
++    entity: 'APPLICATION',
++    model: 'application',
++    allowedFields: [
++      'status', 'notes', 'targetPosition', 'recommendedDept',
++      'iqScore', 'enTestScore', 'depTestScore', 'aiTestScore',
++      'hrComment', 'ceoComment', 'gmdComment', 'mdComment', 'smdComment',
++      'experienceLevel', 'gender', 'rejectionReason', 'followUpDate',
++      'taskAssigned', 'taskCompleted', 'overallScore', 'startDate', 'departmentName',
++    ],
++    dateFields: ['followUpDate', 'startDate'],
++  },
++  STATUS_CHANGE_APPLICATION: {
++    kind: 'UPDATE',
++    entity: 'APPLICATION',
++    model: 'application',
++    allowedFields: ['status'],
++    dateFields: [],
++  },
++};
++
++function supports(action) {
++  return Boolean(ACTIONS[String(action || '').trim().toUpperCase()]);
++}
++
++function configFor(event) {
++  const config = ACTIONS[String(event?.action || '').trim().toUpperCase()];
++  if (!config) return null;
++  if (String(event?.entity || '').trim().toUpperCase() !== config.entity) return null;
++  return config;
++}
++
++function comparable(value, field, config) {
++  if (value === null || value === undefined) return value ?? null;
++  if ((config.dateFields || []).includes(field) || (config.guardFields || []).includes(field)) {
++    const date = value instanceof Date ? value : new Date(value);
++    return Number.isNaN(date.getTime()) ? String(value) : date.toISOString();
++  }
++  if (typeof value === 'object') return JSON.stringify(value);
++  return value;
++}
++
++function undoFields(event, config) {
++  const requested = Array.isArray(event?.metadata?.undoFields)
++    ? event.metadata.undoFields.map((field) => String(field))
++    : [];
++  const allowed = new Set(config.allowedFields || []);
++  return [...new Set(requested.filter((field) => allowed.has(field)))];
++}
++
++async function activeDeletion(db, entityType, entityId) {
++  return db.deletionRecord.findFirst({
++    where: {
++      entityType,
++      entityId: String(entityId),
++      isActive: true,
++    },
++    select: { id: true },
++  });
++}
++
++function recordMatchesState(record, state, fields, config) {
++  if (!record || !state) return false;
++  return fields.every(
++    (field) => comparable(record[field], field, config) === comparable(state[field], field, config)
++  );
++}
++
++function restoreData(event, config) {
++  const fields = undoFields(event, config);
++  const data = {};
++  for (const field of fields) {
++    let value = event?.beforeState?.[field];
++    if ((config.dateFields || []).includes(field) && value !== null && value !== undefined) {
++      const date = new Date(value);
++      if (Number.isNaN(date.getTime())) return { data: null, fields };
++      value = date;
++    }
++    data[field] = value ?? null;
++  }
++  return { data, fields };
++}
++
++async function getAvailability(db, event) {
++  const config = configFor(event);
++  if (!config) return { available: false, reason: 'ACTION_OR_ENTITY_NOT_SUPPORTED' };
++
++  const entityId = String(event?.entityId || '').trim();
++  if (!entityId) return { available: false, reason: 'ENTITY_ID_MISSING' };
++
++  const record = await db[config.model].findUnique({ where: { id: entityId } });
++  if (!record) return { available: false, reason: 'SOURCE_RECORD_MISSING' };
++
++  const deleted = await activeDeletion(db, config.entity, entityId);
++  if (deleted) return { available: false, reason: 'SOURCE_IS_SOFT_DELETED' };
++
++  if (config.kind === 'CREATE_COMPENSATION') {
++    if (config.entity === 'JOB') {
++      const applications = await db.application.count({ where: { jobId: entityId } });
++      if (applications > 0) return { available: false, reason: 'JOB_HAS_APPLICATIONS' };
++    }
++    const guards = config.guardFields || [];
++    if (!recordMatchesState(record, event.afterState, guards, config)) {
++      return { available: false, reason: 'SOURCE_CHANGED_AFTER_CREATE' };
++    }
++    return { available: true, reason: null, record };
++  }
++
++  const fields = undoFields(event, config);
++  if (!fields.length) return { available: false, reason: 'UNDO_FIELDS_MISSING' };
++  if (!recordMatchesState(record, event.afterState, fields, config)) {
++    return { available: false, reason: 'NEWER_CHANGE_CONFLICT' };
++  }
++
++  const restored = restoreData(event, config);
++  if (!restored.data) return { available: false, reason: 'INVALID_BEFORE_STATE' };
++  return { available: true, reason: null, record, fields, restoreData: restored.data };
++}
++
++async function writeRecoveryLedger({ tx, event, actor, req, reviewNote, beforeState, afterState, metadata }) {
++  const reversalEvent = await recordAuditEvent({
++    ...actor,
++    action: 'UNDO',
++    module: event.module,
++    entity: event.entity,
++    entityId: event.entityId,
++    summary: `Undo ${event.action} for ${event.entity || 'record'}`,
++    beforeState: sanitizeForAudit(beforeState),
++    afterState: sanitizeForAudit(afterState),
++    metadata: sanitizeForAudit({
++      reversalOfAuditId: event.id,
++      originalAction: event.action,
++      note: reviewNote,
++      ...metadata,
++    }),
++    requestId: req.auditRequestId || null,
++    method: req.method || 'POST',
++    route: req.originalUrl || null,
++    outcome: 'SUCCESS',
++    statusCode: 200,
++    source: actor.source || 'WEB',
++    reversible: false,
++    ipAddress: clientIp(req),
++    userAgent: req.get?.('user-agent') || null,
++  }, tx);
++
++  if (!reversalEvent) {
++    const error = new Error('Unable to write reversal audit event.');
++    error.statusCode = 500;
++    error.code = 'REVERSAL_AUDIT_WRITE_FAILED';
++    throw error;
++  }
++
++  const recovery = await tx.recoveryRecord.create({
++    data: {
++      originalAuditId: event.id,
++      reversalAuditId: reversalEvent.id,
++      module: event.module,
++      entityType: event.entity || null,
++      entityId: event.entityId || null,
++      originalAction: event.action,
++      status: 'COMPLETED',
++      note: reviewNote,
++      requestedById: actor.userId || null,
++      requestedByName: actor.actorName || null,
++      requestedByEmail: actor.actorEmail || null,
++      requestedByRole: actor.actorRole || null,
++      metadata: sanitizeForAudit({
++        requestId: req.auditRequestId || null,
++        recoveryKind: metadata?.recoveryKind || null,
++        changedFields: metadata?.changedFields || null,
++        deletionRecordId: metadata?.deletionRecordId || null,
++      }),
++    },
++  });
++
++  return { recovery, reversalEvent };
++}
++
++async function undo({ tx, event, actor, req, reviewNote, now }) {
++  const config = configFor(event);
++  if (!config) {
++    const error = new Error('This recovery action is not supported.');
++    error.statusCode = 409;
++    error.code = 'RECOVERY_NOT_SUPPORTED';
++    throw error;
++  }
++
++  const availability = await getAvailability(tx, event);
++  if (!availability.available) {
++    const error = new Error(`Undo blocked: ${availability.reason}`);
++    error.statusCode = 409;
++    error.code = availability.reason;
++    throw error;
++  }
++
++  if (config.kind === 'UPDATE') {
++    const beforeUndo = availability.record;
++    const updated = await tx[config.model].update({
++      where: { id: String(event.entityId) },
++      data: availability.restoreData,
++    });
++
++    const ledger = await writeRecoveryLedger({
++      tx,
++      event,
++      actor,
++      req,
++      reviewNote,
++      beforeState: beforeUndo,
++      afterState: updated,
++      metadata: {
++        recoveryKind: 'STATE_RESTORE',
++        changedFields: availability.fields,
++      },
++    });
++
++    return { ...ledger, restored: updated };
++  }
++
++  const source = availability.record;
++  const reason = `Undo ${event.action} from audit event ${event.id}`;
++  const deletion = await tx.deletionRecord.create({
++    data: {
++      module: event.module || 'RECRUITMENT',
++      entityType: config.entity,
++      entityId: String(event.entityId),
++      entityLabel: source.title || `${config.entity} ${event.entityId}`,
++      status: 'CONFIRMED',
++      isActive: true,
++      reason,
++      requestedById: actor.userId || null,
++      requestedByName: actor.actorName || null,
++      requestedByEmail: actor.actorEmail || null,
++      requestedByRole: actor.actorRole || null,
++      requestedAt: now,
++      reviewedById: actor.userId || null,
++      reviewedByName: actor.actorName || null,
++      reviewedByEmail: actor.actorEmail || null,
++      reviewedByRole: actor.actorRole || null,
++      reviewedAt: now,
++      confirmedAt: now,
++      snapshot: sanitizeForAudit(source),
++      metadata: sanitizeForAudit({
++        recoveryKind: 'CREATE_COMPENSATION',
++        reversalOfAuditId: event.id,
++      }),
++    },
++  });
++
++  const ledger = await writeRecoveryLedger({
++    tx,
++    event,
++    actor,
++    req,
++    reviewNote,
++    beforeState: source,
++    afterState: {
++      deletionRecordId: deletion.id,
++      status: deletion.status,
++      isActive: deletion.isActive,
++    },
++    metadata: {
++      recoveryKind: 'CREATE_COMPENSATION',
++      deletionRecordId: deletion.id,
++    },
++  });
++
++  return { ...ledger, restored: deletion };
++}
++
++module.exports = {
++  SUPPORTED_ACTIONS,
++  supports,
++  getAvailability,
++  undo,
++};
+diff --git a/backend/src/services/recruitment-recovery-audit.service.js b/backend/src/services/recruitment-recovery-audit.service.js
+new file mode 100644
+--- /dev/null
++++ b/backend/src/services/recruitment-recovery-audit.service.js
+@@ -0,0 +1,88 @@
++'use strict';
++
++const {
++  actorSnapshot,
++  clientIp,
++  recordAuditEvent,
++  sanitizeForAudit,
++} = require('./audit.service');
++
++const JOB_SNAPSHOT_FIELDS = [
++  'id', 'title', 'description', 'requirements', 'location', 'jobType', 'workModel',
++  'salaryRange', 'status', 'positionCode', 'departmentId', 'postedAt', 'closedAt',
++  'createdAt', 'updatedAt',
++];
++
++const APPLICATION_SNAPSHOT_FIELDS = [
++  'id', 'status', 'notes', 'targetPosition', 'recommendedDept',
++  'iqScore', 'enTestScore', 'depTestScore', 'aiTestScore',
++  'hrComment', 'ceoComment', 'gmdComment', 'mdComment', 'smdComment',
++  'experienceLevel', 'gender', 'rejectionReason', 'followUpDate',
++  'taskAssigned', 'taskCompleted', 'overallScore', 'startDate', 'departmentName',
++  'createdAt', 'updatedAt',
++];
++
++function pick(record, fields) {
++  if (!record) return null;
++  const output = {};
++  for (const field of fields) {
++    if (record[field] !== undefined) output[field] = record[field];
++  }
++  return output;
++}
++
++function jobRecoverySnapshot(record) {
++  return pick(record, JOB_SNAPSHOT_FIELDS);
++}
++
++function applicationRecoverySnapshot(record) {
++  return pick(record, APPLICATION_SNAPSHOT_FIELDS);
++}
++
++async function recordRecruitmentRecoveryEvent(req, {
++  action,
++  entity,
++  entityId,
++  summary,
++  beforeState,
++  afterState,
++  undoFields,
++  metadata,
++  statusCode = 200,
++}) {
++  const actor = actorSnapshot(req);
++  const event = await recordAuditEvent({
++    ...actor,
++    action,
++    module: 'RECRUITMENT',
++    entity,
++    entityId: String(entityId),
++    summary,
++    beforeState: sanitizeForAudit(beforeState),
++    afterState: sanitizeForAudit(afterState),
++    metadata: sanitizeForAudit({
++      undoFields: [...new Set((undoFields || []).map((field) => String(field)))],
++      recoveryPhase: '3B',
++      ...metadata,
++    }),
++    requestId: req.auditRequestId || null,
++    method: req.method || null,
++    route: req.originalUrl || null,
++    outcome: 'SUCCESS',
++    statusCode,
++    source: actor.source || 'WEB',
++    reversible: true,
++    ipAddress: clientIp(req),
++    userAgent: req.get?.('user-agent') || null,
++  });
++
++  // Suppress the generic HTTP audit only when the richer reversible event was written.
++  if (event) req.skipCentralAudit = true;
++  return event;
++}
++
++module.exports = {
++  jobRecoverySnapshot,
++  applicationRecoverySnapshot,
++  recordRecruitmentRecoveryEvent,
++};
+diff --git a/backend/src/services/recovery.service.js b/backend/src/services/recovery.service.js
+--- a/backend/src/services/recovery.service.js
++++ b/backend/src/services/recovery.service.js
+@@ -4,5 +4,7 @@
+   recordAuditEvent,
+   sanitizeForAudit,
+ } = require('./audit.service');
++const advancedRecovery = require('./recovery.action.service');
+ 
+-const SUPPORTED_ACTIONS = ['SOFT_DELETE', 'CONFIRM_DELETE'];
++const DELETION_ACTIONS = ['SOFT_DELETE', 'CONFIRM_DELETE'];
++const SUPPORTED_ACTIONS = [...DELETION_ACTIONS, ...advancedRecovery.SUPPORTED_ACTIONS];
+@@ -10,27 +10,34 @@
+     && event.outcome === 'SUCCESS'
+     && SUPPORTED_ACTIONS.includes(event.action);
+ 
+-  let active = false;
+-  const deletionRecordId = deletionRecordIdFromEvent(event);
+-  if (supported && deletionRecordId) {
+-    const deletion = await prisma.deletionRecord.findUnique({
+-      where: { id: String(deletionRecordId) },
+-      select: { isActive: true, status: true },
+-    });
+-    active = Boolean(deletion?.isActive);
++  let available = false;
++  let reason = null;
++
++  if (!supported) {
++    reason = 'NOT_SUPPORTED';
++  } else if (recovery) {
++    reason = 'ALREADY_UNDONE';
++  } else if (advancedRecovery.supports(event.action)) {
++    const advanced = await advancedRecovery.getAvailability(prisma, event);
++    available = Boolean(advanced.available);
++    reason = advanced.reason || null;
++  } else {
++    const deletionRecordId = deletionRecordIdFromEvent(event);
++    if (deletionRecordId) {
++      const deletion = await prisma.deletionRecord.findUnique({
++        where: { id: String(deletionRecordId) },
++        select: { isActive: true, status: true },
++      });
++      available = Boolean(deletion?.isActive);
++    }
++    reason = available ? null : 'SOURCE_ALREADY_RESTORED_OR_INACTIVE';
+   }
+ 
+   return {
+     event,
+     recovery,
+     supported,
+-    available: supported && !recovery && active,
+-    reason: !supported
+-      ? 'NOT_SUPPORTED'
+-      : recovery
+-        ? 'ALREADY_UNDONE'
+-        : active
+-          ? null
+-          : 'SOURCE_ALREADY_RESTORED_OR_INACTIVE',
++    available,
++    reason,
+   };
+ }
+@@ -1,15 +1,32 @@
+   const activeKeys = new Set(activeDeletions.map((row) => key(row.entityType, row.entityId)));
+ 
+-  return {
+-    events: events.map((event) => {
+-      const recovery = recoveryByAudit.get(event.id) || null;
+-      const active = activeKeys.has(key(event.entity, event.entityId));
++  const enrichedEvents = await Promise.all(events.map(async (event) => {
++    const recovery = recoveryByAudit.get(event.id) || null;
++    if (recovery) {
++      return { ...event, recovery, recoveryAvailable: false, recoveryReason: 'ALREADY_UNDONE' };
++    }
++
++    if (advancedRecovery.supports(event.action)) {
++      const advanced = await advancedRecovery.getAvailability(prisma, event);
+       return {
+         ...event,
+-        recovery,
+-        recoveryAvailable: !recovery && active,
++        recovery: null,
++        recoveryAvailable: Boolean(advanced.available),
++        recoveryReason: advanced.reason || null,
+       };
+-    }),
++    }
++
++    const active = activeKeys.has(key(event.entity, event.entityId));
++    return {
++      ...event,
++      recovery: null,
++      recoveryAvailable: active,
++      recoveryReason: active ? null : 'SOURCE_ALREADY_RESTORED_OR_INACTIVE',
++    };
++  }));
++
++  return {
++    events: enrichedEvents,
+     pagination: {
+       page,
+       pageSize,
+@@ -1,4 +1,15 @@
+     const existing = await tx.recoveryRecord.findUnique({ where: { originalAuditId: event.id } });
+     if (existing) throw httpError(409, 'This audit event has already been undone.', 'RECOVERY_ALREADY_COMPLETED');
+ 
++    if (advancedRecovery.supports(event.action)) {
++      return advancedRecovery.undo({
++        tx,
++        event,
++        actor,
++        req,
++        reviewNote,
++        now,
++      });
++    }
++
+     const deletionRecordId = deletionRecordIdFromEvent(event);
+diff --git a/backend/src/controllers/recruitment.controller.js b/backend/src/controllers/recruitment.controller.js
+--- a/backend/src/controllers/recruitment.controller.js
++++ b/backend/src/controllers/recruitment.controller.js
+@@ -3,5 +3,10 @@
+   assertEntityVisible,
+   requestSoftDelete,
+ } = require('../services/deletion.service');
++const {
++  jobRecoverySnapshot,
++  applicationRecoverySnapshot,
++  recordRecruitmentRecoveryEvent,
++} = require('../services/recruitment-recovery-audit.service');
+ 
+ const JOB_WRITE_FIELDS = ['title', 'description', 'requirements', 'location', 'jobType', 'workModel', 'salaryRange', 'status', 'positionCode', 'departmentId'];
+@@ -1,5 +1,8 @@
+       prisma.application.findMany({
+-        where: { targetPosition: { not: null } },
++        where: {
++          targetPosition: { not: null },
++          ...(deletedApplicationIds.length ? { id: { notIn: deletedApplicationIds } } : {})
++        },
+         select: { targetPosition: true },
+         distinct: ['targetPosition']
+       })
+@@ -2,6 +2,19 @@
+   try {
+     const data = sanitizeJobPayload(req.body);
+     const job = await prisma.job.create({ data });
++
++    await recordRecruitmentRecoveryEvent(req, {
++      action: 'CREATE_JOB',
++      entity: 'JOB',
++      entityId: job.id,
++      summary: `Created job ${job.title}`,
++      beforeState: null,
++      afterState: jobRecoverySnapshot(job),
++      undoFields: [],
++      metadata: { recoveryKind: 'CREATE_COMPENSATION', guardFields: ['updatedAt'] },
++      statusCode: 201,
++    });
++
+     res.status(201).json({ success: true, message: 'Job created', job });
+   } catch (error) {
+     next(error);
+@@ -2,6 +2,15 @@
+   try {
+     const { id } = req.params;
+     const data = sanitizeJobPayload(req.body, { partial: true });
++    await assertEntityVisible('JOB', id);
++
++    const [beforeJob, deletedApplicationIds] = await Promise.all([
++      prisma.job.findUnique({ where: { id } }),
++      getActiveDeletionIds('APPLICATION'),
++    ]);
++    if (!beforeJob) {
++      return res.status(404).json({ success: false, message: 'Job not found' });
++    }
+ 
+     if (Object.keys(data).length === 0) {
+       return res.status(400).json({ success: false, message: 'No valid job fields to update' });
+@@ -11,11 +20,21 @@
+       where: { id },
+       data,
+       include: {
+-          applications: {
+-            where: deletedApplicationIds.length ? { id: { notIn: deletedApplicationIds } } : undefined,
+-            select: { id: true, status: true }
+-          }
++        applications: {
++          where: deletedApplicationIds.length ? { id: { notIn: deletedApplicationIds } } : undefined,
++          select: { id: true, status: true }
+         }
++      }
++    });
++
++    await recordRecruitmentRecoveryEvent(req, {
++      action: 'UPDATE_JOB',
++      entity: 'JOB',
++      entityId: id,
++      summary: `Updated job ${job.title}`,
++      beforeState: jobRecoverySnapshot(beforeJob),
++      afterState: jobRecoverySnapshot(job),
++      undoFields: Object.keys(data),
+     });
+ 
+     res.json({ success: true, message: 'Job updated', job });
+@@ -26,10 +26,27 @@
+       }
+     }
+ 
++    const beforeApplication = await prisma.application.findUnique({ where: { id } });
++    if (!beforeApplication) {
++      return res.status(404).json({ success: false, message: 'Application not found' });
++    }
++
+     const application = await prisma.application.update({
+       where: { id },
+       data: updateData
+     });
++
++    if (Object.keys(updateData).length) {
++      await recordRecruitmentRecoveryEvent(req, {
++        action: 'UPDATE_APPLICATION',
++        entity: 'APPLICATION',
++        entityId: id,
++        summary: 'Updated recruitment application',
++        beforeState: applicationRecoverySnapshot(beforeApplication),
++        afterState: applicationRecoverySnapshot(application),
++        undoFields: Object.keys(updateData),
++      });
++    }
+ 
+     res.json({ success: true, message: 'Application updated', application });
+   } catch (error) {
+@@ -3,10 +3,27 @@
+     const { id } = req.params;
+     const { status } = req.body;
+     await assertEntityVisible('APPLICATION', id);
++
++    const beforeApplication = await prisma.application.findUnique({ where: { id } });
++    if (!beforeApplication) {
++      return res.status(404).json({ success: false, message: 'Application not found' });
++    }
++
+     const application = await prisma.application.update({
+       where: { id },
+       data: { status }
+     });
++
++    await recordRecruitmentRecoveryEvent(req, {
++      action: 'STATUS_CHANGE_APPLICATION',
++      entity: 'APPLICATION',
++      entityId: id,
++      summary: `Application status changed from ${beforeApplication.status} to ${application.status}`,
++      beforeState: applicationRecoverySnapshot(beforeApplication),
++      afterState: applicationRecoverySnapshot(application),
++      undoFields: ['status'],
++    });
++
+     res.json({ success: true, message: 'Status updated', application });
+   } catch (error) {
+     next(error);
+@@ -1,3 +1,4 @@
+ exports.scheduleInterview = async (req, res, next) => {
+   try {
++    await assertEntityVisible('APPLICATION', req.body.applicationId);
+     const interview = await prisma.interview.create({ data: req.body });
+@@ -1,11 +1,19 @@
+ exports.getStats = async (req, res, next) => {
+   try {
++    const deletedApplicationIds = await getActiveDeletionIds('APPLICATION');
++    const visibleApplications = deletedApplicationIds.length
++      ? { id: { notIn: deletedApplicationIds } }
++      : {};
+     const [totalApplications, hired, rejected, newApplications, interviewScheduled, statusGroups] = await Promise.all([
+-      prisma.application.count(),
+-      prisma.application.count({ where: { status: "HIRED" } }),
+-      prisma.application.count({ where: { status: "REJECTED" } }),
+-      prisma.application.count({ where: { status: "SUBMITTED" } }),
+-      prisma.application.count({ where: { status: "INTERVIEW_SCHEDULED" } }),
++      prisma.application.count({ where: visibleApplications }),
++      prisma.application.count({ where: { ...visibleApplications, status: "HIRED" } }),
++      prisma.application.count({ where: { ...visibleApplications, status: "REJECTED" } }),
++      prisma.application.count({ where: { ...visibleApplications, status: "SUBMITTED" } }),
++      prisma.application.count({ where: { ...visibleApplications, status: "INTERVIEW_SCHEDULED" } }),
+       // Real per-stage counts for the recruitment pipeline UI (all statuses, not just the 4 above).
+-      prisma.application.groupBy({ by: ['status'], _count: { status: true } })
++      prisma.application.groupBy({
++        by: ['status'],
++        where: visibleApplications,
++        _count: { status: true }
++      })
+     ]);
+diff --git a/frontend/src/pages/RecoveryCenter.jsx b/frontend/src/pages/RecoveryCenter.jsx
+--- a/frontend/src/pages/RecoveryCenter.jsx
++++ b/frontend/src/pages/RecoveryCenter.jsx
+@@ -1 +1 @@
+-      setNotice('Recovery completed. The source record is visible again and the original audit event was preserved.');
++      setNotice('Recovery completed safely. The original audit event was preserved and a new UNDO event was recorded.');
+@@ -1,5 +1,5 @@
+-          <span className="thrs-recovery-eyebrow">SYSTEM GOVERNANCE · PHASE 3A</span>
++          <span className="thrs-recovery-eyebrow">SYSTEM GOVERNANCE · PHASE 3B</span>
+           <h1>Recovery Center</h1>
+-          <p>Controlled reversal of supported actions without rewriting the immutable audit history.</p>
++          <p>Controlled reversal for soft deletes, safe edits, status changes, and supported create compensation.</p>
+         </div>
+-        <span className="thrs-recovery-badge">UNDO ENGINE ACTIVE</span>
++        <span className="thrs-recovery-badge">ADVANCED UNDO ACTIVE</span>
+@@ -1 +1 @@
+-        <span>Phase 3A · Soft Delete Recovery</span>
++        <span>Phase 3B · State Recovery</span>
+@@ -1 +1 @@
+-            <p>The original audit event will remain unchanged. THRS will restore the hidden source record and create a new UNDO event referencing it.</p>
++            <p>The original audit event will remain unchanged. THRS will apply the supported compensating action and create a new UNDO event referencing it.</p>
