@@ -1,0 +1,536 @@
+diff --git a/backend/src/controllers/deletion.controller.js b/backend/src/controllers/deletion.controller.js
+--- a/backend/src/controllers/deletion.controller.js
++++ b/backend/src/controllers/deletion.controller.js
+@@ -1,2 +1,3 @@
+ const prisma = require('../config/database');
+ const { reviewDeletion } = require('../services/deletion.service');
++const { requestGovernanceAction } = require('../services/governance.service');
+diff --git a/backend/src/controllers/deletion.controller.js b/backend/src/controllers/deletion.controller.js
+--- a/backend/src/controllers/deletion.controller.js
++++ b/backend/src/controllers/deletion.controller.js
+@@ -1,8 +1,17 @@
+ async function confirmRecord(req, res) {
+   try {
+-    const record = await reviewDeletion(req, req.params.id, 'CONFIRM', req.body?.note);
+-    return res.json({ success: true, message: 'Soft deletion confirmed by Super Admin.', data: record });
++    const result = await requestGovernanceAction(req, {
++      actionType: 'CONFIRM_DELETE',
++      targetDeletionId: req.params.id,
++      reason: req.body?.note,
++    });
++    return res.status(result.alreadyPending ? 200 : 202).json({
++      success: true,
++      message: result.alreadyPending
++        ? 'Deletion confirmation is already waiting in Pending Actions.'
++        : 'Deletion confirmation submitted to Pending Actions for approval.',
++      data: result.request,
++    });
+   } catch (error) {
+-    return res.status(error.statusCode || 500).json({ success: false, message: error.message || 'Failed to confirm deletion' });
++    return res.status(error.statusCode || 500).json({ success: false, message: error.message || 'Failed to request deletion confirmation' });
+   }
+ }
+diff --git a/backend/src/controllers/recovery.controller.js b/backend/src/controllers/recovery.controller.js
+--- a/backend/src/controllers/recovery.controller.js
++++ b/backend/src/controllers/recovery.controller.js
+@@ -1,3 +1,4 @@
+ } = require('../services/recovery.service');
++const { requestGovernanceAction } = require('../services/governance.service');
+ 
+ function sendError(res, error, fallback) {
+diff --git a/backend/src/controllers/recovery.controller.js b/backend/src/controllers/recovery.controller.js
+--- a/backend/src/controllers/recovery.controller.js
++++ b/backend/src/controllers/recovery.controller.js
+@@ -1,13 +1,19 @@
+ async function undo(req, res) {
+   try {
+-    const result = await undoAuditEvent(req, req.params.auditId, req.body?.note);
+-    return res.json({
++    const result = await requestGovernanceAction(req, {
++      actionType: 'UNDO_AUDIT',
++      targetAuditId: req.params.auditId,
++      reason: req.body?.note,
++    });
++    return res.status(result.alreadyPending ? 200 : 202).json({
+       success: true,
+-      message: 'Action undone. The original audit event was preserved and a reversal event was added.',
+-      data: result,
++      message: result.alreadyPending
++        ? 'Undo request is already waiting in Pending Actions.'
++        : 'Undo submitted to Pending Actions for approval.',
++      data: result.request,
+     });
+   } catch (error) {
+-    return sendError(res, error, 'Failed to undo audit event');
++    return sendError(res, error, 'Failed to request undo');
+   }
+ }
+diff --git a/backend/src/services/deletion.service.js b/backend/src/services/deletion.service.js
+--- a/backend/src/services/deletion.service.js
++++ b/backend/src/services/deletion.service.js
+@@ -1,4 +1,4 @@
+   JOB: {
+     module: 'RECRUITMENT',
+-    async load(id) {
+-      return prisma.job.findUnique({
++    async load(id, db = prisma) {
++      return db.job.findUnique({
+diff --git a/backend/src/services/deletion.service.js b/backend/src/services/deletion.service.js
+--- a/backend/src/services/deletion.service.js
++++ b/backend/src/services/deletion.service.js
+@@ -1,4 +1,4 @@
+   APPLICATION: {
+     module: 'RECRUITMENT',
+-    async load(id) {
+-      return prisma.application.findUnique({
++    async load(id, db = prisma) {
++      return db.application.findUnique({
+diff --git a/backend/src/services/deletion.service.js b/backend/src/services/deletion.service.js
+--- a/backend/src/services/deletion.service.js
++++ b/backend/src/services/deletion.service.js
+@@ -1,7 +1,49 @@
+     label(record) {
+       const name = [record?.firstName, record?.lastName].filter(Boolean).join(' ').trim();
+       return name || record?.email || record?.phone || `Application ${record?.id || ''}`.trim();
+     },
+   },
++  EMPLOYEE: {
++    module: 'EMPLOYEES',
++    async load(id, db = prisma) {
++      return db.employee.findUnique({
++        where: { id: String(id) },
++        select: {
++          id: true,
++          employeeCode: true,
++          status: true,
++          centralEmail: true,
++          centralId: true,
++          departmentId: true,
++          positionId: true,
++          managerId: true,
++          userId: true,
++          createdAt: true,
++          updatedAt: true,
++          user: {
++            select: { id: true, email: true, firstName: true, lastName: true, isActive: true },
++          },
++        },
++      });
++    },
++    label(record) {
++      const name = [record?.user?.firstName, record?.user?.lastName].filter(Boolean).join(' ').trim();
++      return name || record?.employeeCode || record?.centralEmail || `Employee ${record?.id || ''}`.trim();
++    },
++    async onSoftDelete(db, record) {
++      await db.employee.update({ where: { id: record.id }, data: { status: 'INACTIVE' } });
++      if (record.userId) await db.user.update({ where: { id: record.userId }, data: { isActive: false } });
++    },
++    async onRestore(db, deletionRecord) {
++      const snapshot = deletionRecord.snapshot || {};
++      await db.employee.update({
++        where: { id: deletionRecord.entityId },
++        data: { status: snapshot.status || 'ACTIVE' },
++      });
++      if (snapshot.user?.id) {
++        await db.user.update({
++          where: { id: snapshot.user.id },
++          data: { isActive: snapshot.user.isActive !== false },
++        });
++      }
++    },
++  },
+ };
+diff --git a/backend/src/services/deletion.service.js b/backend/src/services/deletion.service.js
+--- a/backend/src/services/deletion.service.js
++++ b/backend/src/services/deletion.service.js
+@@ -1,69 +1,73 @@
+ async function requestSoftDelete(req, entityType, entityId, reason) {
+   const { normalized, adapter } = getAdapter(entityType);
+   const normalizedId = String(entityId || '').trim();
+   if (!normalizedId) throw makeHttpError(400, 'Entity ID is required.');
+-
+-  const existing = await prisma.deletionRecord.findFirst({
+-    where: { entityType: normalized, entityId: normalizedId, isActive: true },
+-    orderBy: { createdAt: 'desc' },
+-  });
+-  if (existing) return { record: existing, alreadyDeleted: true };
+-
+-  const sourceRecord = await adapter.load(normalizedId);
+-  if (!sourceRecord) throw makeHttpError(404, 'Record not found');
+-
+   const actor = actorSnapshot(req);
+-  const snapshot = sanitizeForAudit(sourceRecord);
+-  // The domain-level SOFT_DELETE event below is richer than the generic HTTP audit event.
+   req.skipCentralAudit = true;
+   const resolvedReason = cleanReason(reason, `Requested from ${adapter.module}`);
+ 
+-  const record = await prisma.deletionRecord.create({
+-    data: {
+-      module: adapter.module,
+-      entityType: normalized,
+-      entityId: normalizedId,
+-      entityLabel: adapter.label(sourceRecord),
+-      status: STATUS_PENDING,
+-      isActive: true,
+-      reason: resolvedReason,
+-      requestedById: actor.userId || null,
+-      requestedByName: actor.actorName || null,
+-      requestedByEmail: actor.actorEmail || null,
+-      requestedByRole: actor.actorRole || null,
+-      snapshot,
+-      metadata: {
+-        source: actor.source || 'WEB',
+-        route: req.originalUrl || null,
+-        requestId: req.auditRequestId || null,
++  return prisma.$transaction(async (tx) => {
++    const existing = await tx.deletionRecord.findFirst({
++      where: { entityType: normalized, entityId: normalizedId, isActive: true },
++      orderBy: { createdAt: 'desc' },
++    });
++    if (existing) return { record: existing, alreadyDeleted: true };
++
++    const sourceRecord = await adapter.load(normalizedId, tx);
++    if (!sourceRecord) throw makeHttpError(404, 'Record not found');
++    const snapshot = sanitizeForAudit(sourceRecord);
++
++    const record = await tx.deletionRecord.create({
++      data: {
++        module: adapter.module,
++        entityType: normalized,
++        entityId: normalizedId,
++        entityLabel: adapter.label(sourceRecord),
++        status: STATUS_PENDING,
++        isActive: true,
++        reason: resolvedReason,
++        requestedById: actor.userId || null,
++        requestedByName: actor.actorName || null,
++        requestedByEmail: actor.actorEmail || null,
++        requestedByRole: actor.actorRole || null,
++        snapshot,
++        metadata: {
++          source: actor.source || 'WEB',
++          route: req.originalUrl || null,
++          requestId: req.auditRequestId || null,
++        },
+       },
+-    },
+-  });
++    });
+ 
+-  await recordAuditEvent({
+-    ...actor,
+-    action: 'SOFT_DELETE',
+-    module: adapter.module,
+-    entity: normalized,
+-    entityId: normalizedId,
+-    summary: `Soft deleted ${normalized} pending Super Admin review`,
+-    beforeState: snapshot,
+-    afterState: { deletionRecordId: record.id, status: record.status, isActive: true },
+-    metadata: { deletionRecordId: record.id, reason: resolvedReason },
+-    requestId: req.auditRequestId || null,
+-    method: req.method || 'DELETE',
+-    route: req.originalUrl || null,
+-    outcome: 'SUCCESS',
+-    statusCode: 202,
+-    source: actor.source || 'WEB',
+-    reversible: true,
+-    ipAddress: clientIp(req),
+-    userAgent: req.get?.('user-agent') || null,
+-  });
++    if (typeof adapter.onSoftDelete === 'function') await adapter.onSoftDelete(tx, sourceRecord, record);
+ 
+-  return { record, alreadyDeleted: false };
++    await recordAuditEvent({
++      ...actor,
++      action: 'SOFT_DELETE',
++      module: adapter.module,
++      entity: normalized,
++      entityId: normalizedId,
++      summary: `Soft deleted ${normalized} pending Super Admin review`,
++      beforeState: snapshot,
++      afterState: { deletionRecordId: record.id, status: record.status, isActive: true },
++      metadata: { deletionRecordId: record.id, reason: resolvedReason },
++      requestId: req.auditRequestId || null,
++      method: req.method || 'DELETE',
++      route: req.originalUrl || null,
++      outcome: 'SUCCESS',
++      statusCode: 202,
++      source: actor.source || 'WEB',
++      reversible: true,
++      ipAddress: clientIp(req),
++      userAgent: req.get?.('user-agent') || null,
++    }, tx);
++
++    return { record, alreadyDeleted: false };
++  });
+ }
++
++async function restoreSourceForDeletion(db, record) {
++  const adapter = ENTITY_ADAPTERS[normalizeEntityType(record?.entityType)];
++  if (adapter && typeof adapter.onRestore === 'function') await adapter.onRestore(db, record);
++}
+diff --git a/backend/src/services/deletion.service.js b/backend/src/services/deletion.service.js
+--- a/backend/src/services/deletion.service.js
++++ b/backend/src/services/deletion.service.js
+@@ -1,76 +1,82 @@
+ async function reviewDeletion(req, deletionId, decision, note) {
+-  const record = await prisma.deletionRecord.findUnique({ where: { id: String(deletionId) } });
+-  if (!record) throw makeHttpError(404, 'Deletion record not found');
+-
+   const normalizedDecision = String(decision || '').trim().toUpperCase();
+   if (!['CONFIRM', 'RESTORE'].includes(normalizedDecision)) {
+     throw makeHttpError(400, 'Invalid deletion review decision');
+   }
+-  if (!record.isActive && normalizedDecision === 'RESTORE') return record;
+-  if (record.status === STATUS_CONFIRMED && normalizedDecision === 'CONFIRM') return record;
+ 
+   const actor = actorSnapshot(req);
+   const now = new Date();
+   const isRestore = normalizedDecision === 'RESTORE';
+ 
+-  const updated = await prisma.deletionRecord.update({
+-    where: { id: record.id },
+-    data: {
+-      status: isRestore ? STATUS_RESTORED : STATUS_CONFIRMED,
+-      isActive: !isRestore,
+-      reviewedById: actor.userId || null,
+-      reviewedByName: actor.actorName || null,
+-      reviewedByEmail: actor.actorEmail || null,
+-      reviewedByRole: actor.actorRole || null,
+-      reviewedAt: now,
+-      reviewNote: String(note || '').trim().slice(0, 1000) || null,
+-      restoredAt: isRestore ? now : record.restoredAt,
+-      confirmedAt: isRestore ? record.confirmedAt : now,
+-    },
++  const result = await prisma.$transaction(async (tx) => {
++    const record = await tx.deletionRecord.findUnique({ where: { id: String(deletionId) } });
++    if (!record) throw makeHttpError(404, 'Deletion record not found');
++    if (!record.isActive && isRestore) return { record, updated: record };
++    if (record.status === STATUS_CONFIRMED && !isRestore) return { record, updated: record };
++
++    const updated = await tx.deletionRecord.update({
++      where: { id: record.id },
++      data: {
++        status: isRestore ? STATUS_RESTORED : STATUS_CONFIRMED,
++        isActive: !isRestore,
++        reviewedById: actor.userId || null,
++        reviewedByName: actor.actorName || null,
++        reviewedByEmail: actor.actorEmail || null,
++        reviewedByRole: actor.actorRole || null,
++        reviewedAt: now,
++        reviewNote: String(note || '').trim().slice(0, 1000) || null,
++        restoredAt: isRestore ? now : record.restoredAt,
++        confirmedAt: isRestore ? record.confirmedAt : now,
++      },
++    });
++
++    if (isRestore) await restoreSourceForDeletion(tx, record);
++    return { record, updated };
+   });
++  const { record, updated } = result;
+ 
+   await recordAuditEvent({
+     ...actor,
+     action: isRestore ? 'RESTORE' : 'CONFIRM_DELETE',
+@@ -1,3 +1,4 @@
+   requestSoftDelete,
+   reviewDeletion,
++  restoreSourceForDeletion,
+ };
+diff --git a/backend/src/services/recovery.service.js b/backend/src/services/recovery.service.js
+--- a/backend/src/services/recovery.service.js
++++ b/backend/src/services/recovery.service.js
+@@ -1,3 +1,4 @@
+ const advancedRecovery = require('./recovery.action.service');
++const { restoreSourceForDeletion } = require('./deletion.service');
+ 
+ const DELETION_ACTIONS = ['SOFT_DELETE', 'CONFIRM_DELETE'];
+diff --git a/backend/src/services/recovery.service.js b/backend/src/services/recovery.service.js
+--- a/backend/src/services/recovery.service.js
++++ b/backend/src/services/recovery.service.js
+@@ -1,17 +1,18 @@
+     const restored = await tx.deletionRecord.update({
+       where: { id: deletion.id },
+       data: {
+         status: 'RESTORED',
+         isActive: false,
+         reviewedById: actor.userId || null,
+         reviewedByName: actor.actorName || null,
+         reviewedByEmail: actor.actorEmail || null,
+         reviewedByRole: actor.actorRole || null,
+         reviewedAt: now,
+         restoredAt: now,
+         reviewNote: reviewNote || `Undo of audit event ${event.id}`,
+       },
+     });
++    await restoreSourceForDeletion(tx, deletion);
+ 
+     const reversalEvent = await recordAuditEvent({
+diff --git a/backend/src/controllers/employee.controller.js b/backend/src/controllers/employee.controller.js
+--- a/backend/src/controllers/employee.controller.js
++++ b/backend/src/controllers/employee.controller.js
+@@ -1,5 +1,10 @@
+ const prisma = require('../config/database');
+ const bcrypt = require('bcryptjs');
+ const { buildVisibleImportAttendanceHistory } = require('../utils/employee-attendance-history');
++const {
++  getActiveDeletionIds,
++  assertEntityVisible,
++  requestSoftDelete,
++} = require('../services/deletion.service');
+ 
+ const EMPLOYEE_CODE_PREFIX = 'EMP-';
+diff --git a/backend/src/controllers/employee.controller.js b/backend/src/controllers/employee.controller.js
+--- a/backend/src/controllers/employee.controller.js
++++ b/backend/src/controllers/employee.controller.js
+@@ -1,5 +1,7 @@
+     const status = req.query.status ? String(req.query.status).trim().toUpperCase() : null;
+     const where = {};
+     if (status) where.status = status;
++    const deletedEmployeeIds = await getActiveDeletionIds('EMPLOYEE');
++    if (deletedEmployeeIds.length) where.id = { notIn: deletedEmployeeIds };
+ 
+     const employees = await prisma.employee.findMany({
+diff --git a/backend/src/controllers/employee.controller.js b/backend/src/controllers/employee.controller.js
+--- a/backend/src/controllers/employee.controller.js
++++ b/backend/src/controllers/employee.controller.js
+@@ -1,3 +1,7 @@
++    const deletedEmployeeIds = await getActiveDeletionIds('EMPLOYEE');
+     const employees = await prisma.employee.findMany({
+-      where: { status: { in: ['ACTIVE', 'PROBATION', 'ON_LEAVE'] } },
++      where: {
++        status: { in: ['ACTIVE', 'PROBATION', 'ON_LEAVE'] },
++        ...(deletedEmployeeIds.length ? { id: { notIn: deletedEmployeeIds } } : {}),
++      },
+       include: {
+diff --git a/backend/src/controllers/employee.controller.js b/backend/src/controllers/employee.controller.js
+--- a/backend/src/controllers/employee.controller.js
++++ b/backend/src/controllers/employee.controller.js
+@@ -1,7 +1,9 @@
+ exports.getAllEmployees = async (req, res, next) => {
+   try {
+     const { page = 1, limit = 10, search, department, status } = req.query;
+ 
+     const where = {};
++    const deletedEmployeeIds = await getActiveDeletionIds('EMPLOYEE');
++    if (deletedEmployeeIds.length) where.id = { notIn: deletedEmployeeIds };
+ 
+     if (search) {
+diff --git a/backend/src/controllers/employee.controller.js b/backend/src/controllers/employee.controller.js
+--- a/backend/src/controllers/employee.controller.js
++++ b/backend/src/controllers/employee.controller.js
+@@ -1,6 +1,7 @@
+ exports.getEmployeeById = async (req, res, next) => {
+   try {
+     const { id } = req.params;
++    await assertEntityVisible('EMPLOYEE', id);
+ 
+     const employee = await prisma.employee.findUnique({
+diff --git a/backend/src/controllers/employee.controller.js b/backend/src/controllers/employee.controller.js
+--- a/backend/src/controllers/employee.controller.js
++++ b/backend/src/controllers/employee.controller.js
+@@ -1,5 +1,6 @@
+ exports.updateEmployee = async (req, res, next) => {
+   try {
+     const { id } = req.params;
++    await assertEntityVisible('EMPLOYEE', id);
+     const data = normalizeEmployeePayload({ ...req.body });
+diff --git a/backend/src/controllers/employee.controller.js b/backend/src/controllers/employee.controller.js
+--- a/backend/src/controllers/employee.controller.js
++++ b/backend/src/controllers/employee.controller.js
+@@ -1,26 +1,19 @@
+ // Delete employee
+ exports.deleteEmployee = async (req, res, next) => {
+   try {
+     const { id } = req.params;
+-
+-    await prisma.employee.delete({
+-      where: { id }
+-    });
+-
+-    // Create audit log
+-    await prisma.auditLog.create({
+-      data: {
+-        userId: req.userId,
+-        action: 'DELETE_EMPLOYEE',
+-        entity: 'EMPLOYEE',
+-        entityId: id
+-      }
+-    });
+-
+-    res.json({
++    const { record, alreadyDeleted } = await requestSoftDelete(req, 'EMPLOYEE', id, req.body?.reason);
++    return res.status(alreadyDeleted ? 200 : 202).json({
+       success: true,
+-      message: 'Employee deleted successfully'
++      message: alreadyDeleted
++        ? 'Employee is already in the Recycle Bin.'
++        : 'Employee moved to the Recycle Bin. Login access is disabled until restored.',
++      deletion: record,
+     });
+   } catch (error) {
+     next(error);
+   }
+ };
+diff --git a/frontend/src/App.jsx b/frontend/src/App.jsx
+--- a/frontend/src/App.jsx
++++ b/frontend/src/App.jsx
+@@ -1,4 +1,7 @@
+       <Route path="/settings" element={<ProtectedRoute roles={['SUPER_ADMIN', 'CEO', 'HR_ADMIN']}><Settings /></ProtectedRoute>} />
+-            <Route path="/deletion-center" element={<ReservedSuperAdminRoute><DeletionCenter /></ReservedSuperAdminRoute>} />
+-<Route path="/audit-center" element={<ReservedSuperAdminRoute><AuditCenter /></ReservedSuperAdminRoute>} />
+-<Route path="/executive-ai" element={<ReservedSuperAdminRoute><ExecutiveAIWorkspace /></ReservedSuperAdminRoute>} />
++      <Route path="/system-control-center" element={<ReservedSuperAdminRoute><SystemControlCenter /></ReservedSuperAdminRoute>} />
++      <Route path="/pending-actions" element={<ReservedSuperAdminRoute><GovernancePendingActions /></ReservedSuperAdminRoute>} />
++      <Route path="/recovery-center" element={<ReservedSuperAdminRoute><RecoveryCenter /></ReservedSuperAdminRoute>} />
++      <Route path="/deletion-center" element={<ReservedSuperAdminRoute><DeletionCenter /></ReservedSuperAdminRoute>} />
++      <Route path="/audit-center" element={<ReservedSuperAdminRoute><AuditCenter /></ReservedSuperAdminRoute>} />
++      <Route path="/executive-ai" element={<ReservedSuperAdminRoute><ExecutiveAIWorkspace /></ReservedSuperAdminRoute>} />
+diff --git a/frontend/src/components/Layout/Sidebar.jsx b/frontend/src/components/Layout/Sidebar.jsx
+--- a/frontend/src/components/Layout/Sidebar.jsx
++++ b/frontend/src/components/Layout/Sidebar.jsx
+@@ -1,6 +1,7 @@
+     items: section.items.filter((item) => {
+       const roleAllowed = item.roles.includes(user?.role);
+       const emailAllowed = !item.emails || item.emails.map((email) => String(email).toLowerCase()).includes(normalizedEmail);
+-      return roleAllowed && emailAllowed;
++      const reservedAllowed = !item.reservedOnly || isAllowedAgentSuperAdmin(user);
++      return roleAllowed && emailAllowed && reservedAllowed;
+     })
+diff --git a/frontend/src/pages/RecoveryCenter.jsx b/frontend/src/pages/RecoveryCenter.jsx
+--- a/frontend/src/pages/RecoveryCenter.jsx
++++ b/frontend/src/pages/RecoveryCenter.jsx
+@@ -1,3 +1,3 @@
+     try {
+-      await api.post(`/recovery/events/${undoTarget.id}/undo`, { note: note.trim() || undefined });
++      const response = await api.post(`/recovery/events/${undoTarget.id}/undo`, { note: note.trim() || undefined });
+       setNotice(response?.data?.message || 'Undo request submitted to Pending Actions.');
+diff --git a/frontend/src/pages/RecoveryCenter.jsx b/frontend/src/pages/RecoveryCenter.jsx
+--- a/frontend/src/pages/RecoveryCenter.jsx
++++ b/frontend/src/pages/RecoveryCenter.jsx
+@@ -1,2 +1,2 @@
+               <button type="button" disabled={submitting} onClick={() => { setUndoTarget(null); setNote(''); }}>Cancel</button>
+-              <button type="button" className="is-primary" disabled={submitting} onClick={submitUndo}>{submitting ? 'Reversing…' : 'Confirm Undo'}</button>
++              <button type="button" className="is-primary" disabled={submitting || note.trim().length < 3} onClick={submitUndo}>{submitting ? 'Submitting…' : 'Request Undo'}</button>
+diff --git a/frontend/src/pages/DeletionCenter.jsx b/frontend/src/pages/DeletionCenter.jsx
+--- a/frontend/src/pages/DeletionCenter.jsx
++++ b/frontend/src/pages/DeletionCenter.jsx
+@@ -1,16 +1,16 @@
+               <textarea
+                 value={reviewNote}
+                 onChange={(event) => setReviewNote(event.target.value)}
+                 maxLength={1000}
+-                placeholder="Optional governance note..."
++                placeholder={review.mode === 'restore' ? 'Optional governance note...' : 'Required governance reason...'}
+               />
+             </label>
+             <div className="thrs-delete-review-actions">
+-              <button type="button" disabled={submitting || (review.mode !== 'restore' && reviewNote.trim().length < 3)} onClick={() => setReview(null)}>Cancel</button>
++              <button type="button" disabled={submitting} onClick={() => setReview(null)}>Cancel</button>
+               <button
+                 type="button"
+                 disabled={submitting || (review.mode !== 'restore' && reviewNote.trim().length < 3)}
+-                className={review.mode === 'restore' ? 'is-restore' : 'is-confirm'} disabled={submitting || (review.mode !== 'restore' && reviewNote.trim().length < 3)}
++                className={review.mode === 'restore' ? 'is-restore' : 'is-confirm'}
+                 onClick={submitReview}
+               >
