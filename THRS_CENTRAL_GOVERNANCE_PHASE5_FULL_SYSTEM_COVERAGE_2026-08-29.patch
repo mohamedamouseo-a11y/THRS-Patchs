@@ -1,0 +1,930 @@
+diff --git a/backend/prisma/schema.prisma b/backend/prisma/schema.prisma
+--- a/backend/prisma/schema.prisma
++++ b/backend/prisma/schema.prisma
+@@ -1371,6 +1371,44 @@ model RecoveryRecord {
+   @@map("recovery_records")
+ }
+ 
++model GovernanceAction {
++  id               String   @id @default(uuid())
++  actionType       String
++  status           String   @default("PENDING")
++  module           String   @default("SYSTEM_GOVERNANCE")
++  entityType       String?
++  entityId         String?
++  targetAuditId    String?
++  targetDeletionId String?
++  reason           String
++
++  requestedById    String?
++  requestedByName  String?
++  requestedByEmail String?
++  requestedByRole  String?
++  requestedAt      DateTime @default(now())
++
++  reviewedById    String?
++  reviewedByName  String?
++  reviewedByEmail String?
++  reviewedByRole  String?
++  reviewedAt      DateTime?
++  reviewNote      String?
++
++  executionResult Json?
++  metadata        Json?
++  createdAt       DateTime @default(now())
++  updatedAt       DateTime @updatedAt
++
++  @@index([status, createdAt])
++  @@index([actionType, status])
++  @@index([targetAuditId])
++  @@index([targetDeletionId])
++  @@index([requestedById, createdAt])
++  @@map("governance_actions")
++}
++
+ enum NotificationType {
+   LEAVE_REQUEST
+   LEAVE_STATUS
+diff --git a/backend/src/middleware/audit.middleware.js b/backend/src/middleware/audit.middleware.js
+--- a/backend/src/middleware/audit.middleware.js
++++ b/backend/src/middleware/audit.middleware.js
+@@ -18,6 +18,7 @@ function centralAuditMiddleware(req, res, next) {
+   if (String(req.originalUrl || '').startsWith('/api/v1/audit')) return next();
+   if (String(req.originalUrl || '').startsWith('/api/v1/deletions')) return next();
+   if (String(req.originalUrl || '').startsWith('/api/v1/recovery')) return next();
++  if (String(req.originalUrl || '').startsWith('/api/v1/governance')) return next();
+ 
+   const requestId = String(req.headers['x-request-id'] || '').trim() || crypto.randomUUID();
+   const startedAt = Date.now();
+diff --git a/backend/src/services/governance-coverage.service.js b/backend/src/services/governance-coverage.service.js
+new file mode 100644
+--- /dev/null
++++ b/backend/src/services/governance-coverage.service.js
+@@ -0,0 +1,119 @@
++'use strict';
++
++const prisma = require('../config/database');
++
++const MODULE_POLICIES = Object.freeze([
++  {
++    module: 'EMPLOYEES',
++    audit: 'CENTRAL_AUDIT',
++    deletion: 'SOFT_DELETE',
++    recovery: 'RESTORE_AND_UNDO',
++    governance: 'CONFIRM_REQUIRES_APPROVAL',
++    note: 'Employee access is disabled while the employee record is hidden.',
++  },
++  {
++    module: 'RECRUITMENT',
++    audit: 'CENTRAL_AUDIT_AND_DOMAIN_EVENTS',
++    deletion: 'SOFT_DELETE',
++    recovery: 'STATE_UNDO_AND_RESTORE',
++    governance: 'CONFIRM_AND_UNDO_REQUIRE_APPROVAL',
++    note: 'Jobs and applications use governed deletion and conflict-safe recovery.',
++  },
++  {
++    module: 'ATTENDANCE',
++    audit: 'CENTRAL_AUDIT',
++    deletion: 'NOT_APPLICABLE',
++    recovery: 'CORRECTION_WORKFLOW',
++    governance: 'AUDIT_ONLY',
++    note: 'Time records remain historical; corrections are preferred over destructive rollback.',
++  },
++  {
++    module: 'LEAVE',
++    audit: 'CENTRAL_AUDIT',
++    deletion: 'NOT_APPLICABLE',
++    recovery: 'COMPENSATING_ACTION_REQUIRED',
++    governance: 'AUDIT_ONLY',
++    note: 'Leave decisions can have notification and TOS side effects, so automatic rollback is intentionally blocked.',
++  },
++  {
++    module: 'OVERTIME',
++    audit: 'CENTRAL_AUDIT',
++    deletion: 'NOT_APPLICABLE',
++    recovery: 'COMPENSATING_ACTION_REQUIRED',
++    governance: 'AUDIT_ONLY',
++    note: 'Overtime decisions can propagate externally and are not silently reversed.',
++  },
++  {
++    module: 'PAYROLL',
++    audit: 'CENTRAL_AUDIT',
++    deletion: 'DISABLED',
++    recovery: 'NO_AUTOMATIC_FINANCIAL_UNDO',
++    governance: 'EXISTING_SALARY_APPROVALS_PLUS_AUDIT',
++    note: 'Paid or externally synchronized financial state is never automatically rolled back.',
++  },
++  {
++    module: 'PERMISSIONS',
++    audit: 'CENTRAL_AUDIT',
++    deletion: 'NOT_APPLICABLE',
++    recovery: 'NO_AUTOMATIC_SECURITY_ROLLBACK',
++    governance: 'AUDIT_ONLY',
++    note: 'Security changes remain auditable but are not auto-reversed by the recovery engine.',
++  },
++]);
++
++function retentionDays() {
++  const value = Number(process.env.GOVERNANCE_RETENTION_DAYS || 365);
++  return Number.isFinite(value) && value >= 30 ? Math.floor(value) : 365;
++}
++
++async function getGovernanceCoverageReport() {
++  const days = retentionDays();
++  const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
++
++  const [
++    auditEvents,
++    activeDeletions,
++    confirmedDeletions,
++    restoredDeletions,
++    recoveries,
++    pendingActions,
++    approvedActions,
++    rejectedActions,
++    retentionReviewEligible,
++    auditGroups,
++  ] = await Promise.all([
++    prisma.auditLog.count(),
++    prisma.deletionRecord.count({ where: { isActive: true } }),
++    prisma.deletionRecord.count({ where: { status: 'CONFIRMED' } }),
++    prisma.deletionRecord.count({ where: { status: 'RESTORED' } }),
++    prisma.recoveryRecord.count(),
++    prisma.governanceAction.count({ where: { status: 'PENDING' } }),
++    prisma.governanceAction.count({ where: { status: 'APPROVED' } }),
++    prisma.governanceAction.count({ where: { status: 'REJECTED' } }),
++    prisma.deletionRecord.count({
++      where: { status: 'CONFIRMED', isActive: true, confirmedAt: { lte: cutoff } },
++    }),
++    prisma.auditLog.groupBy({ by: ['module'], _count: { id: true } }),
++  ]);
++
++  const auditByModule = Object.fromEntries(
++    auditGroups.map((row) => [String(row.module || 'SYSTEM').toUpperCase(), row._count.id])
++  );
++
++  return {
++    generatedAt: new Date(),
++    phase: 'PHASE_5_FULL_SYSTEM_COVERAGE',
++    totals: {
++      auditEvents,
++      activeDeletions,
++      confirmedDeletions,
++      restoredDeletions,
++      recoveries,
++      pendingActions,
++      approvedActions,
++      rejectedActions,
++    },
++    retention: {
++      retentionDays: days,
++      cutoff,
++      reviewEligible: retentionReviewEligible,
++      automaticPurge: false,
++      policy: 'REVIEW_ONLY_NO_AUTOMATIC_PURGE',
++    },
++    modules: MODULE_POLICIES.map((policy) => ({
++      ...policy,
++      auditEvents: auditByModule[policy.module] || auditByModule[policy.module.replace(/S$/, '')] || 0,
++    })),
++  };
++}
++
++module.exports = { MODULE_POLICIES, getGovernanceCoverageReport };
+diff --git a/backend/src/controllers/governance.controller.js b/backend/src/controllers/governance.controller.js
+--- a/backend/src/controllers/governance.controller.js
++++ b/backend/src/controllers/governance.controller.js
+@@ -1,9 +1,11 @@
+ 'use strict';
+ 
+ const {
+   listGovernanceActions,
+   getGovernanceSummary,
+   reviewGovernanceAction,
+ } = require('../services/governance.service');
++const { getGovernanceCoverageReport } = require('../services/governance-coverage.service');
+@@ -19,6 +21,14 @@ async function summary(req, res) {
+   }
+ }
+ 
++async function coverage(req, res) {
++  try {
++    return res.json({ success: true, data: await getGovernanceCoverageReport() });
++  } catch (error) {
++    return sendError(res, error, 'Failed to load governance coverage');
++  }
++}
++
+ async function requests(req, res) {
+@@ -47,4 +57,4 @@ async function reject(req, res) {
+   }
+ }
+ 
+-module.exports = { summary, requests, approve, reject };
++module.exports = { summary, coverage, requests, approve, reject };
+diff --git a/backend/src/routes/governance.routes.js b/backend/src/routes/governance.routes.js
+--- a/backend/src/routes/governance.routes.js
++++ b/backend/src/routes/governance.routes.js
+@@ -18,6 +18,7 @@ function primarySuperAdminOnly(req, res, next) {
+ router.use(authMiddleware);
+ router.use(primarySuperAdminOnly);
+ router.get('/summary', governanceController.summary);
++router.get('/coverage', governanceController.coverage);
+ router.get('/requests', governanceController.requests);
+ router.post('/requests/:id/approve', governanceController.approve);
+ router.post('/requests/:id/reject', governanceController.reject);
+diff --git a/backend/src/controllers/deletion.controller.js b/backend/src/controllers/deletion.controller.js
+--- a/backend/src/controllers/deletion.controller.js
++++ b/backend/src/controllers/deletion.controller.js
+@@ -1,7 +1,8 @@
+ 'use strict';
+ 
+ const prisma = require('../config/database');
+ const { reviewDeletion } = require('../services/deletion.service');
++const { requestGovernanceAction } = require('../services/governance.service');
+@@ -111,8 +112,17 @@ async function confirmRecord(req, res) {
+   try {
+-    const record = await reviewDeletion(req, req.params.id, 'CONFIRM', req.body?.note);
+-    return res.json({ success: true, message: 'Soft deletion confirmed by Super Admin.', data: record });
++    const result = await requestGovernanceAction(req, {
++      actionType: 'CONFIRM_DELETE',
++      targetDeletionId: req.params.id,
++      reason: req.body?.note,
++    });
++    return res.status(result.alreadyPending ? 200 : 202).json({
++      success: true,
++      message: result.alreadyPending
++        ? 'Deletion confirmation is already waiting in Pending Actions.'
++        : 'Deletion confirmation submitted to Pending Actions for approval.',
++      data: result.request,
++    });
+   } catch (error) {
+-    return res.status(error.statusCode || 500).json({ success: false, message: error.message || 'Failed to confirm deletion' });
++    return res.status(error.statusCode || 500).json({ success: false, message: error.message || 'Failed to request deletion confirmation' });
+   }
+ }
+diff --git a/backend/src/controllers/recovery.controller.js b/backend/src/controllers/recovery.controller.js
+--- a/backend/src/controllers/recovery.controller.js
++++ b/backend/src/controllers/recovery.controller.js
+@@ -5,6 +5,7 @@ const {
+   getRecoverySummary,
+   undoAuditEvent,
+ } = require('../services/recovery.service');
++const { requestGovernanceAction } = require('../services/governance.service');
+@@ -42,15 +43,21 @@ async function undo(req, res) {
+   try {
+-    const result = await undoAuditEvent(req, req.params.auditId, req.body?.note);
+-    return res.json({
++    const result = await requestGovernanceAction(req, {
++      actionType: 'UNDO_AUDIT',
++      targetAuditId: req.params.auditId,
++      reason: req.body?.note,
++    });
++    return res.status(result.alreadyPending ? 200 : 202).json({
+       success: true,
+-      message: 'Action undone. The original audit event was preserved and a reversal event was added.',
+-      data: result,
++      message: result.alreadyPending
++        ? 'Undo request is already waiting in Pending Actions.'
++        : 'Undo submitted to Pending Actions for approval.',
++      data: result.request,
+     });
+   } catch (error) {
+-    return sendError(res, error, 'Failed to undo audit event');
++    return sendError(res, error, 'Failed to request undo');
+   }
+ }
+diff --git a/backend/src/services/deletion.service.js b/backend/src/services/deletion.service.js
+--- a/backend/src/services/deletion.service.js
++++ b/backend/src/services/deletion.service.js
+@@ -23,9 +23,9 @@ const ENTITY_ADAPTERS = {
+   JOB: {
+     module: 'RECRUITMENT',
+-    async load(id) {
+-      return prisma.job.findUnique({
++    async load(id, db = prisma) {
++      return db.job.findUnique({
+@@ -41,9 +41,9 @@ const ENTITY_ADAPTERS = {
+   APPLICATION: {
+     module: 'RECRUITMENT',
+-    async load(id) {
+-      return prisma.application.findUnique({
++    async load(id, db = prisma) {
++      return db.application.findUnique({
+@@ -59,6 +59,42 @@ const ENTITY_ADAPTERS = {
+       return name || record?.email || record?.phone || `Application ${record?.id || ''}`.trim();
+     },
+   },
++  EMPLOYEE: {
++    module: 'EMPLOYEES',
++    async load(id, db = prisma) {
++      return db.employee.findUnique({
++        where: { id: String(id) },
++        select: {
++          id: true,
++          employeeCode: true,
++          status: true,
++          centralEmail: true,
++          centralId: true,
++          departmentId: true,
++          positionId: true,
++          managerId: true,
++          userId: true,
++          createdAt: true,
++          updatedAt: true,
++          user: {
++            select: { id: true, email: true, firstName: true, lastName: true, isActive: true },
++          },
++        },
++      });
++    },
++    label(record) {
++      const name = [record?.user?.firstName, record?.user?.lastName].filter(Boolean).join(' ').trim();
++      return name || record?.employeeCode || record?.centralEmail || `Employee ${record?.id || ''}`.trim();
++    },
++    async onSoftDelete(db, record) {
++      await db.employee.update({ where: { id: record.id }, data: { status: 'INACTIVE' } });
++      if (record.userId) await db.user.update({ where: { id: record.userId }, data: { isActive: false } });
++    },
++    async onRestore(db, deletionRecord) {
++      const snapshot = deletionRecord.snapshot || {};
++      await db.employee.update({
++        where: { id: deletionRecord.entityId },
++        data: { status: snapshot.status || 'ACTIVE' },
++      });
++      if (snapshot.user?.id) {
++        await db.user.update({
++          where: { id: snapshot.user.id },
++          data: { isActive: snapshot.user.isActive !== false },
++        });
++      }
++    },
++  },
+ };
+@@ -100,46 +136,50 @@ async function requestSoftDelete(req, entityType, entityId, reason) {
+-  const existing = await prisma.deletionRecord.findFirst({
+-    where: { entityType: normalized, entityId: normalizedId, isActive: true },
+-    orderBy: { createdAt: 'desc' },
+-  });
+-  if (existing) return { record: existing, alreadyDeleted: true };
+-
+-  const sourceRecord = await adapter.load(normalizedId);
+-  if (!sourceRecord) throw makeHttpError(404, 'Record not found');
+-
+   const actor = actorSnapshot(req);
+-  const snapshot = sanitizeForAudit(sourceRecord);
+-  // The domain-level SOFT_DELETE event below is richer than the generic HTTP audit event.
+   req.skipCentralAudit = true;
+   const resolvedReason = cleanReason(reason, `Requested from ${adapter.module}`);
+ 
+-  const record = await prisma.deletionRecord.create({
+-    data: {
+-      module: adapter.module,
+-      entityType: normalized,
+-      entityId: normalizedId,
+-      entityLabel: adapter.label(sourceRecord),
+-      status: STATUS_PENDING,
+-      isActive: true,
+-      reason: resolvedReason,
+-      requestedById: actor.userId || null,
+-      requestedByName: actor.actorName || null,
+-      requestedByEmail: actor.actorEmail || null,
+-      requestedByRole: actor.actorRole || null,
+-      snapshot,
+-      metadata: {
+-        source: actor.source || 'WEB',
+-        route: req.originalUrl || null,
+-        requestId: req.auditRequestId || null,
++  return prisma.$transaction(async (tx) => {
++    const existing = await tx.deletionRecord.findFirst({
++      where: { entityType: normalized, entityId: normalizedId, isActive: true },
++      orderBy: { createdAt: 'desc' },
++    });
++    if (existing) return { record: existing, alreadyDeleted: true };
++
++    const sourceRecord = await adapter.load(normalizedId, tx);
++    if (!sourceRecord) throw makeHttpError(404, 'Record not found');
++    const snapshot = sanitizeForAudit(sourceRecord);
++
++    const record = await tx.deletionRecord.create({
++      data: {
++        module: adapter.module,
++        entityType: normalized,
++        entityId: normalizedId,
++        entityLabel: adapter.label(sourceRecord),
++        status: STATUS_PENDING,
++        isActive: true,
++        reason: resolvedReason,
++        requestedById: actor.userId || null,
++        requestedByName: actor.actorName || null,
++        requestedByEmail: actor.actorEmail || null,
++        requestedByRole: actor.actorRole || null,
++        snapshot,
++        metadata: {
++          source: actor.source || 'WEB',
++          route: req.originalUrl || null,
++          requestId: req.auditRequestId || null,
++        },
+       },
+-    },
+-  });
++    });
++
++    if (typeof adapter.onSoftDelete === 'function') await adapter.onSoftDelete(tx, sourceRecord, record);
+ 
+-  await recordAuditEvent({
+-    ...actor,
+-    action: 'SOFT_DELETE',
+-    module: adapter.module,
+-    entity: normalized,
+-    entityId: normalizedId,
+-    summary: `Soft deleted ${normalized} pending Super Admin review`,
+-    beforeState: snapshot,
+-    afterState: { deletionRecordId: record.id, status: record.status, isActive: true },
+-    metadata: { deletionRecordId: record.id, reason: resolvedReason },
+-    requestId: req.auditRequestId || null,
+-    method: req.method || 'DELETE',
+-    route: req.originalUrl || null,
+-    outcome: 'SUCCESS',
+-    statusCode: 202,
+-    source: actor.source || 'WEB',
+-    reversible: true,
+-    ipAddress: clientIp(req),
+-    userAgent: req.get?.('user-agent') || null,
+-  });
++    await recordAuditEvent({
++      ...actor,
++      action: 'SOFT_DELETE',
++      module: adapter.module,
++      entity: normalized,
++      entityId: normalizedId,
++      summary: `Soft deleted ${normalized} pending Super Admin review`,
++      beforeState: snapshot,
++      afterState: { deletionRecordId: record.id, status: record.status, isActive: true },
++      metadata: { deletionRecordId: record.id, reason: resolvedReason },
++      requestId: req.auditRequestId || null,
++      method: req.method || 'DELETE',
++      route: req.originalUrl || null,
++      outcome: 'SUCCESS',
++      statusCode: 202,
++      source: actor.source || 'WEB',
++      reversible: true,
++      ipAddress: clientIp(req),
++      userAgent: req.get?.('user-agent') || null,
++    }, tx);
+ 
+-  return { record, alreadyDeleted: false };
++    return { record, alreadyDeleted: false };
++  });
+ }
++
++async function restoreSourceForDeletion(db, record) {
++  const adapter = ENTITY_ADAPTERS[normalizeEntityType(record?.entityType)];
++  if (adapter && typeof adapter.onRestore === 'function') await adapter.onRestore(db, record);
++}
+@@ -151,37 +191,43 @@ async function reviewDeletion(req, deletionId, decision, note) {
+-  const record = await prisma.deletionRecord.findUnique({ where: { id: String(deletionId) } });
+-  if (!record) throw makeHttpError(404, 'Deletion record not found');
+-
+   const normalizedDecision = String(decision || '').trim().toUpperCase();
+   if (!['CONFIRM', 'RESTORE'].includes(normalizedDecision)) {
+     throw makeHttpError(400, 'Invalid deletion review decision');
+   }
+-  if (!record.isActive && normalizedDecision === 'RESTORE') return record;
+-  if (record.status === STATUS_CONFIRMED && normalizedDecision === 'CONFIRM') return record;
+-
+   const actor = actorSnapshot(req);
+   const now = new Date();
+   const isRestore = normalizedDecision === 'RESTORE';
+ 
+-  const updated = await prisma.deletionRecord.update({
+-    where: { id: record.id },
+-    data: {
+-      status: isRestore ? STATUS_RESTORED : STATUS_CONFIRMED,
+-      isActive: !isRestore,
+-      reviewedById: actor.userId || null,
+-      reviewedByName: actor.actorName || null,
+-      reviewedByEmail: actor.actorEmail || null,
+-      reviewedByRole: actor.actorRole || null,
+-      reviewedAt: now,
+-      reviewNote: String(note || '').trim().slice(0, 1000) || null,
+-      restoredAt: isRestore ? now : record.restoredAt,
+-      confirmedAt: isRestore ? record.confirmedAt : now,
+-    },
++  const result = await prisma.$transaction(async (tx) => {
++    const record = await tx.deletionRecord.findUnique({ where: { id: String(deletionId) } });
++    if (!record) throw makeHttpError(404, 'Deletion record not found');
++    if (!record.isActive && isRestore) return { record, updated: record };
++    if (record.status === STATUS_CONFIRMED && !isRestore) return { record, updated: record };
++
++    const updated = await tx.deletionRecord.update({
++      where: { id: record.id },
++      data: {
++        status: isRestore ? STATUS_RESTORED : STATUS_CONFIRMED,
++        isActive: !isRestore,
++        reviewedById: actor.userId || null,
++        reviewedByName: actor.actorName || null,
++        reviewedByEmail: actor.actorEmail || null,
++        reviewedByRole: actor.actorRole || null,
++        reviewedAt: now,
++        reviewNote: String(note || '').trim().slice(0, 1000) || null,
++        restoredAt: isRestore ? now : record.restoredAt,
++        confirmedAt: isRestore ? record.confirmedAt : now,
++      },
++    });
++
++    if (isRestore) await restoreSourceForDeletion(tx, record);
++    return { record, updated };
+   });
++  const { record, updated } = result;
+@@ -235,6 +281,7 @@ module.exports = {
+   assertEntityVisible,
+   requestSoftDelete,
+   reviewDeletion,
++  restoreSourceForDeletion,
+ };
+diff --git a/backend/src/services/recovery.service.js b/backend/src/services/recovery.service.js
+--- a/backend/src/services/recovery.service.js
++++ b/backend/src/services/recovery.service.js
+@@ -8,6 +8,7 @@ const {
+   sanitizeForAudit,
+ } = require('./audit.service');
+ const advancedRecovery = require('./recovery.action.service');
++const { restoreSourceForDeletion } = require('./deletion.service');
+@@ -177,6 +178,7 @@ async function undoAuditEvent(req, auditId, note) {
+         reviewNote: reviewNote || `Undo of audit event ${event.id}`,
+       },
+     });
++    await restoreSourceForDeletion(tx, deletion);
+ 
+     const reversalEvent = await recordAuditEvent({
+diff --git a/backend/src/controllers/employee.controller.js b/backend/src/controllers/employee.controller.js
+--- a/backend/src/controllers/employee.controller.js
++++ b/backend/src/controllers/employee.controller.js
+@@ -1,6 +1,11 @@
+ const prisma = require('../config/database');
+ const bcrypt = require('bcryptjs');
+ const { buildVisibleImportAttendanceHistory } = require('../utils/employee-attendance-history');
++const {
++  getActiveDeletionIds,
++  assertEntityVisible,
++  requestSoftDelete,
++} = require('../services/deletion.service');
+@@ -323,6 +328,8 @@ exports.exportEmployeesForFinance = async (req, res, next) => {
+     const status = req.query.status ? String(req.query.status).trim().toUpperCase() : null;
+     const where = {};
+     if (status) where.status = status;
++    const deletedEmployeeIds = await getActiveDeletionIds('EMPLOYEE');
++    if (deletedEmployeeIds.length) where.id = { notIn: deletedEmployeeIds };
+ 
+     const employees = await prisma.employee.findMany({
+@@ -376,8 +383,12 @@ exports.exportEmployeesForTosDirectory = async (req, res, next) => {
+       return res.status(403).json({ success: false, message: 'Access denied.' });
+     }
+ 
++    const deletedEmployeeIds = await getActiveDeletionIds('EMPLOYEE');
+     const employees = await prisma.employee.findMany({
+-      where: { status: { in: ['ACTIVE', 'PROBATION', 'ON_LEAVE'] } },
++      where: {
++        status: { in: ['ACTIVE', 'PROBATION', 'ON_LEAVE'] },
++        ...(deletedEmployeeIds.length ? { id: { notIn: deletedEmployeeIds } } : {}),
++      },
+@@ -438,7 +449,9 @@ exports.getAllEmployees = async (req, res, next) => {
+     const { page = 1, limit = 10, search, department, status } = req.query;
+ 
+     const where = {};
++    const deletedEmployeeIds = await getActiveDeletionIds('EMPLOYEE');
++    if (deletedEmployeeIds.length) where.id = { notIn: deletedEmployeeIds };
+ 
+     if (search) {
+@@ -507,6 +520,7 @@ exports.getEmployeeById = async (req, res, next) => {
+   try {
+     const { id } = req.params;
++    await assertEntityVisible('EMPLOYEE', id);
+ 
+     const employee = await prisma.employee.findUnique({
+@@ -807,6 +821,7 @@ exports.updateEmployee = async (req, res, next) => {
+   try {
+     const { id } = req.params;
++    await assertEntityVisible('EMPLOYEE', id);
+     const data = normalizeEmployeePayload({ ...req.body });
+@@ -970,24 +985,17 @@ exports.deleteEmployee = async (req, res, next) => {
+   try {
+     const { id } = req.params;
+-
+-    await prisma.employee.delete({
+-      where: { id }
+-    });
+-
+-    // Create audit log
+-    await prisma.auditLog.create({
+-      data: {
+-        userId: req.userId,
+-        action: 'DELETE_EMPLOYEE',
+-        entity: 'EMPLOYEE',
+-        entityId: id
+-      }
+-    });
+-
+-    res.json({
++    const { record, alreadyDeleted } = await requestSoftDelete(req, 'EMPLOYEE', id, req.body?.reason);
++    return res.status(alreadyDeleted ? 200 : 202).json({
+       success: true,
+-      message: 'Employee deleted successfully'
++      message: alreadyDeleted
++        ? 'Employee is already in the Recycle Bin.'
++        : 'Employee moved to the Recycle Bin. Login access is disabled until restored.',
++      deletion: record,
+     });
+   } catch (error) {
+     next(error);
+   }
+diff --git a/frontend/src/pages/GovernancePendingActions.jsx b/frontend/src/pages/GovernancePendingActions.jsx
+new file mode 100644
+--- /dev/null
++++ b/frontend/src/pages/GovernancePendingActions.jsx
+@@ -0,0 +1,146 @@
++import React, { useCallback, useEffect, useState } from 'react';
++import api from '../services/api';
++import '../styles/thrs-governance-phase5.css';
++
++const pretty = (value) => String(value || '—').replace(/_/g, ' ').toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase());
++const when = (value) => {
++  if (!value) return '—';
++  const date = new Date(value);
++  return Number.isNaN(date.getTime()) ? '—' : date.toLocaleString();
++};
++
++const GovernancePendingActions = () => {
++  const [summary, setSummary] = useState({ pending: 0, approved: 0, rejected: 0, total: 0 });
++  const [requests, setRequests] = useState([]);
++  const [pagination, setPagination] = useState({ page: 1, pageSize: 25, total: 0, pages: 1 });
++  const [status, setStatus] = useState('PENDING');
++  const [review, setReview] = useState(null);
++  const [note, setNote] = useState('');
++  const [loading, setLoading] = useState(true);
++  const [submitting, setSubmitting] = useState(false);
++  const [message, setMessage] = useState('');
++  const [error, setError] = useState('');
++
++  const loadSummary = useCallback(async () => {
++    const response = await api.get('/governance/summary');
++    setSummary(response?.data?.data || {});
++  }, []);
++
++  const load = useCallback(async (page = 1) => {
++    setLoading(true);
++    setError('');
++    try {
++      const response = await api.get('/governance/requests', {
++        params: { page, pageSize: 25, status: status || undefined },
++      });
++      setRequests(response?.data?.data?.requests || []);
++      setPagination(response?.data?.data?.pagination || { page, pageSize: 25, total: 0, pages: 1 });
++    } catch (requestError) {
++      setError(requestError?.response?.data?.message || requestError?.message || 'Failed to load governance actions.');
++    } finally {
++      setLoading(false);
++    }
++  }, [status]);
++
++  useEffect(() => { loadSummary(); }, [loadSummary]);
++  useEffect(() => { load(1); }, [load]);
++
++  const decide = async () => {
++    if (!review || note.trim().length < 3 || submitting) return;
++    setSubmitting(true);
++    setError('');
++    try {
++      const verb = review.decision === 'APPROVE' ? 'approve' : 'reject';
++      const response = await api.post(`/governance/requests/${review.request.id}/${verb}`, { note: note.trim() });
++      setMessage(response?.data?.message || 'Governance request reviewed.');
++      setReview(null);
++      setNote('');
++      await Promise.all([loadSummary(), load(pagination.page)]);
++    } catch (requestError) {
++      setError(requestError?.response?.data?.message || requestError?.message || 'Governance review failed.');
++    } finally {
++      setSubmitting(false);
++    }
++  };
++
++  return (
++    <div className="thrs-gov-page">
++      <header className="thrs-gov-hero">
++        <div><span>SYSTEM GOVERNANCE · PHASE 5</span><h1>Pending Actions</h1><p>Approve or reject sensitive Undo and deletion-confirmation requests.</p></div>
++        <strong>PRIMARY SUPER ADMIN</strong>
++      </header>
++
++      <section className="thrs-gov-kpis">
++        <article><span>Pending</span><b>{summary.pending || 0}</b></article>
++        <article><span>Approved</span><b>{summary.approved || 0}</b></article>
++        <article><span>Rejected</span><b>{summary.rejected || 0}</b></article>
++        <article><span>Total</span><b>{summary.total || 0}</b></article>
++      </section>
++
++      <div className="thrs-gov-toolbar">
++        <select value={status} onChange={(event) => setStatus(event.target.value)}>
++          <option value="PENDING">Pending</option><option value="APPROVED">Approved</option>
++          <option value="REJECTED">Rejected</option><option value="">All</option>
++        </select>
++      </div>
++      {message && <div className="thrs-gov-message">{message}</div>}
++      {error && <div className="thrs-gov-error">{error}</div>}
++
++      <section className="thrs-gov-card">
++        <div className="thrs-gov-table-wrap"><table><thead><tr><th>Requested</th><th>Action</th><th>Target</th><th>Requester</th><th>Reason</th><th>Status</th><th /></tr></thead><tbody>
++          {loading && <tr><td colSpan="7">Loading…</td></tr>}
++          {!loading && !requests.length && <tr><td colSpan="7">No governance requests.</td></tr>}
++          {!loading && requests.map((item) => (
++            <tr key={item.id}>
++              <td>{when(item.requestedAt)}</td>
++              <td><strong>{pretty(item.actionType)}</strong><small>{pretty(item.module)}</small></td>
++              <td><strong>{pretty(item.entityType)}</strong><small>{String(item.entityId || item.targetAuditId || item.targetDeletionId || '—').slice(0, 18)}</small></td>
++              <td><strong>{item.requestedByName || item.requestedByEmail || 'System actor'}</strong><small>{pretty(item.requestedByRole)}</small></td>
++              <td>{item.reason}</td>
++              <td><span className={`is-${String(item.status).toLowerCase()}`}>{pretty(item.status)}</span></td>
++              <td>{item.status === 'PENDING' && <div className="thrs-gov-actions"><button onClick={() => { setReview({ request: item, decision: 'REJECT' }); setNote(''); }}>Reject</button><button className="is-approve" onClick={() => { setReview({ request: item, decision: 'APPROVE' }); setNote(''); }}>Approve</button></div>}</td>
++            </tr>
++          ))}
++        </tbody></table></div>
++        <footer><span>Page {pagination.page} of {pagination.pages}</span><div><button disabled={pagination.page <= 1} onClick={() => load(pagination.page - 1)}>Previous</button><button disabled={pagination.page >= pagination.pages} onClick={() => load(pagination.page + 1)}>Next</button></div></footer>
++      </section>
++
++      {review && <div className="thrs-gov-backdrop"><div className="thrs-gov-modal"><span>GOVERNANCE DECISION</span><h2>{review.decision === 'APPROVE' ? 'Approve and execute?' : 'Reject request?'}</h2><p>{pretty(review.request.actionType)} · {review.request.reason}</p><textarea value={note} onChange={(event) => setNote(event.target.value)} maxLength={1000} placeholder="Mandatory review note..." /><div><button disabled={submitting} onClick={() => setReview(null)}>Cancel</button><button className={review.decision === 'APPROVE' ? 'is-approve' : ''} disabled={submitting || note.trim().length < 3} onClick={decide}>{submitting ? 'Processing…' : review.decision === 'APPROVE' ? 'Approve & Execute' : 'Reject'}</button></div></div></div>}
++    </div>
++  );
++};
++
++export default GovernancePendingActions;
+diff --git a/frontend/src/pages/SystemControlCenter.jsx b/frontend/src/pages/SystemControlCenter.jsx
+new file mode 100644
+--- /dev/null
++++ b/frontend/src/pages/SystemControlCenter.jsx
+@@ -0,0 +1,93 @@
++import React, { useEffect, useState } from 'react';
++import { Link } from 'react-router-dom';
++import api from '../services/api';
++import '../styles/thrs-governance-phase5.css';
++
++const pretty = (value) => String(value || '—').replace(/_/g, ' ').toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase());
++
++const SystemControlCenter = () => {
++  const [report, setReport] = useState(null);
++  const [error, setError] = useState('');
++
++  useEffect(() => {
++    api.get('/governance/coverage')
++      .then((response) => setReport(response?.data?.data || null))
++      .catch((requestError) => setError(requestError?.response?.data?.message || requestError?.message || 'Failed to load governance coverage.'));
++  }, []);
++
++  const totals = report?.totals || {};
++
++  return (
++    <div className="thrs-gov-page">
++      <header className="thrs-gov-hero">
++        <div><span>THRS SYSTEM GOVERNANCE · PHASE 5</span><h1>System Control Center</h1><p>One place for audit, recycle bin, pending approvals, recovery history, and module coverage.</p></div>
++        <strong>GOVERNANCE ACTIVE</strong>
++      </header>
++
++      <section className="thrs-control-links">
++        <Link to="/audit-center"><b>Audit Center</b><span>Immutable activity history</span></Link>
++        <Link to="/deletion-center"><b>Recycle Bin</b><span>Soft-deleted business records</span></Link>
++        <Link to="/pending-actions"><b>Pending Actions</b><span>Approve / reject sensitive actions</span></Link>
++        <Link to="/recovery-center"><b>Recovery Center</b><span>Recoverable audit events</span></Link>
++      </section>
++
++      {error && <div className="thrs-gov-error">{error}</div>}
++      <section className="thrs-gov-kpis">
++        <article><span>Audit events</span><b>{totals.auditEvents || 0}</b></article>
++        <article><span>Hidden records</span><b>{totals.activeDeletions || 0}</b></article>
++        <article><span>Recoveries</span><b>{totals.recoveries || 0}</b></article>
++        <article><span>Pending approvals</span><b>{totals.pendingActions || 0}</b></article>
++      </section>
++
++      <section className="thrs-gov-card">
++        <div className="thrs-gov-section-head"><div><span>FULL-SYSTEM COVERAGE</span><h2>Governance Policy Matrix</h2></div><small>Phase 5 closure</small></div>
++        <div className="thrs-gov-table-wrap"><table><thead><tr><th>Module</th><th>Audit</th><th>Delete policy</th><th>Recovery</th><th>Governance</th><th>Events</th></tr></thead><tbody>
++          {(report?.modules || []).map((item) => <tr key={item.module}><td><strong>{pretty(item.module)}</strong><small>{item.note}</small></td><td>{pretty(item.audit)}</td><td>{pretty(item.deletion)}</td><td>{pretty(item.recovery)}</td><td>{pretty(item.governance)}</td><td>{item.auditEvents || 0}</td></tr>)}
++          {!report && !error && <tr><td colSpan="6">Loading governance coverage…</td></tr>}
++        </tbody></table></div>
++      </section>
++
++      {report?.retention && <section className="thrs-retention-card"><div><span>Retention policy</span><b>{report.retention.retentionDays} days</b></div><div><span>Confirmed records ready for review</span><b>{report.retention.reviewEligible || 0}</b></div><div><span>Automatic purge</span><b>Disabled</b></div><p>Permanent purge is never automatic. Eligible records remain preserved until an explicit governance policy is approved.</p></section>}
++    </div>
++  );
++};
++
++export default SystemControlCenter;
+diff --git a/frontend/src/styles/thrs-governance-phase5.css b/frontend/src/styles/thrs-governance-phase5.css
+new file mode 100644
+--- /dev/null
++++ b/frontend/src/styles/thrs-governance-phase5.css
+@@ -0,0 +1,134 @@
++.thrs-gov-page{display:flex;flex-direction:column;gap:18px;padding:24px;min-height:100%;color:var(--text-primary,#14213d)}
++.thrs-gov-hero{display:flex;justify-content:space-between;gap:24px;align-items:flex-start;padding:28px;border-radius:24px;background:linear-gradient(135deg,#07182d,#102b4d);color:#fff;box-shadow:0 18px 45px rgba(7,24,45,.18)}
++.thrs-gov-hero span,.thrs-gov-section-head span{font-size:11px;font-weight:800;letter-spacing:.14em;color:#d4b45c}
++.thrs-gov-hero h1{margin:8px 0 6px;font-size:30px;line-height:1.1}.thrs-gov-hero p{margin:0;max-width:760px;color:rgba(255,255,255,.74)}
++.thrs-gov-hero>strong{white-space:nowrap;padding:9px 13px;border:1px solid rgba(212,180,92,.45);border-radius:999px;color:#f1d98f;font-size:11px;letter-spacing:.08em}
++.thrs-gov-kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px}.thrs-gov-kpis article{padding:18px;border:1px solid rgba(17,43,77,.1);border-radius:18px;background:#fff;box-shadow:0 8px 22px rgba(17,43,77,.06)}
++.thrs-gov-kpis article span{display:block;font-size:12px;color:#718096}.thrs-gov-kpis article b{display:block;margin-top:6px;font-size:28px;color:#102b4d}
++.thrs-control-links{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px}.thrs-control-links a{display:flex;flex-direction:column;gap:5px;padding:18px;border-radius:18px;background:#fff;border:1px solid rgba(17,43,77,.1);text-decoration:none;color:#102b4d;transition:.18s ease}.thrs-control-links a:hover{transform:translateY(-2px);border-color:rgba(200,168,78,.55);box-shadow:0 10px 25px rgba(17,43,77,.08)}
++.thrs-control-links b{font-size:15px}.thrs-control-links span{font-size:12px;color:#718096}
++.thrs-gov-toolbar{display:flex;justify-content:flex-end}.thrs-gov-toolbar select{min-width:180px;padding:10px 12px;border-radius:12px;border:1px solid #d8e0ea;background:#fff}
++.thrs-gov-card{background:#fff;border:1px solid rgba(17,43,77,.1);border-radius:20px;overflow:hidden;box-shadow:0 10px 28px rgba(17,43,77,.05)}
++.thrs-gov-section-head{display:flex;align-items:center;justify-content:space-between;padding:20px 22px;border-bottom:1px solid #edf1f5}.thrs-gov-section-head h2{margin:4px 0 0;color:#102b4d}.thrs-gov-section-head small{color:#718096}
++.thrs-gov-table-wrap{overflow:auto}.thrs-gov-card table{width:100%;border-collapse:collapse;min-width:850px}.thrs-gov-card th,.thrs-gov-card td{padding:13px 14px;text-align:left;border-bottom:1px solid #edf1f5;vertical-align:top;font-size:12px}.thrs-gov-card th{background:#f8fafc;color:#65758b;font-size:11px;text-transform:uppercase;letter-spacing:.04em}.thrs-gov-card td strong,.thrs-gov-card td small{display:block}.thrs-gov-card td small{margin-top:4px;color:#8290a3;max-width:320px}
++.thrs-gov-card footer{display:flex;justify-content:space-between;align-items:center;padding:14px 18px}.thrs-gov-card footer div{display:flex;gap:8px}
++.thrs-gov-card button,.thrs-gov-modal button{padding:8px 12px;border:1px solid #d8e0ea;border-radius:10px;background:#fff;cursor:pointer}.thrs-gov-actions{display:flex;gap:7px}.thrs-gov-actions .is-approve,.thrs-gov-modal .is-approve{background:#102b4d;color:#fff;border-color:#102b4d}
++.thrs-gov-message,.thrs-gov-error{padding:12px 15px;border-radius:12px}.thrs-gov-message{background:#edf8f2;color:#17633b}.thrs-gov-error{background:#fff1f1;color:#9b2c2c}
++.thrs-gov-backdrop{position:fixed;inset:0;background:rgba(5,15,28,.56);display:grid;place-items:center;padding:20px;z-index:1300}.thrs-gov-modal{width:min(520px,100%);padding:24px;border-radius:20px;background:#fff;box-shadow:0 30px 80px rgba(0,0,0,.25)}.thrs-gov-modal>span{font-size:11px;font-weight:800;letter-spacing:.1em;color:#b0892f}.thrs-gov-modal h2{margin:8px 0}.thrs-gov-modal textarea{width:100%;min-height:110px;margin:12px 0;padding:12px;border:1px solid #d8e0ea;border-radius:12px;resize:vertical}.thrs-gov-modal>div{display:flex;justify-content:flex-end;gap:8px}
++.thrs-retention-card{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;padding:20px;border-radius:20px;background:#fff;border:1px solid rgba(17,43,77,.1)}.thrs-retention-card div{padding:14px;border-radius:14px;background:#f8fafc}.thrs-retention-card span,.thrs-retention-card b{display:block}.thrs-retention-card span{font-size:12px;color:#718096}.thrs-retention-card b{margin-top:6px;color:#102b4d}.thrs-retention-card p{grid-column:1/-1;margin:0;color:#718096;font-size:12px}
++@media(max-width:1000px){.thrs-gov-kpis,.thrs-control-links{grid-template-columns:repeat(2,minmax(0,1fr))}.thrs-retention-card{grid-template-columns:1fr}}
++@media(max-width:640px){.thrs-gov-page{padding:14px}.thrs-gov-hero{flex-direction:column;padding:20px}.thrs-gov-kpis,.thrs-control-links{grid-template-columns:1fr}.thrs-gov-hero h1{font-size:24px}}
++html[data-theme='dark'] .thrs-gov-page{color:#e8edf5}.dark .thrs-gov-card,.dark .thrs-gov-kpis article,.dark .thrs-control-links a,.dark .thrs-retention-card,html[data-theme='dark'] .thrs-gov-card,html[data-theme='dark'] .thrs-gov-kpis article,html[data-theme='dark'] .thrs-control-links a,html[data-theme='dark'] .thrs-retention-card{background:#101a28;border-color:#263548;color:#e8edf5}
++html[data-theme='dark'] .thrs-gov-kpis article b,html[data-theme='dark'] .thrs-control-links a,html[data-theme='dark'] .thrs-gov-section-head h2{color:#f0f4f9}
++html[data-theme='dark'] .thrs-gov-card th{background:#162233;color:#9fb0c3}html[data-theme='dark'] .thrs-gov-card td,html[data-theme='dark'] .thrs-gov-section-head{border-color:#263548}
++html[data-theme='dark'] .thrs-retention-card div{background:#162233}
+diff --git a/frontend/src/App.jsx b/frontend/src/App.jsx
+--- a/frontend/src/App.jsx
++++ b/frontend/src/App.jsx
+@@ -69,6 +69,9 @@ const DatabaseBackupOAuthCallback = lazy(() => import('./pages/DatabaseBackupOAuthCallback'));
+ const DeletionCenter = lazy(() => import('./pages/DeletionCenter'));
+ const AuditCenter = lazy(() => import('./pages/AuditCenter'));
++const RecoveryCenter = lazy(() => import('./pages/RecoveryCenter'));
++const GovernancePendingActions = lazy(() => import('./pages/GovernancePendingActions'));
++const SystemControlCenter = lazy(() => import('./pages/SystemControlCenter'));
+ const CompanyOverviewReport = lazy(() => import('./pages/reports/CompanyOverviewReport'));
+@@ -222,8 +225,11 @@ const AppRoutes = () => {
+       <Route path="/help" element={<ProtectedRoute><HelpCenter /></ProtectedRoute>} />
+       <Route path="/settings" element={<ProtectedRoute roles={['SUPER_ADMIN', 'CEO', 'HR_ADMIN']}><Settings /></ProtectedRoute>} />
+-            <Route path="/deletion-center" element={<ReservedSuperAdminRoute><DeletionCenter /></ReservedSuperAdminRoute>} />
+-<Route path="/audit-center" element={<ReservedSuperAdminRoute><AuditCenter /></ReservedSuperAdminRoute>} />
++      <Route path="/system-control-center" element={<ReservedSuperAdminRoute><SystemControlCenter /></ReservedSuperAdminRoute>} />
++      <Route path="/pending-actions" element={<ReservedSuperAdminRoute><GovernancePendingActions /></ReservedSuperAdminRoute>} />
++      <Route path="/recovery-center" element={<ReservedSuperAdminRoute><RecoveryCenter /></ReservedSuperAdminRoute>} />
++      <Route path="/deletion-center" element={<ReservedSuperAdminRoute><DeletionCenter /></ReservedSuperAdminRoute>} />
++      <Route path="/audit-center" element={<ReservedSuperAdminRoute><AuditCenter /></ReservedSuperAdminRoute>} />
+ <Route path="/executive-ai" element={<ReservedSuperAdminRoute><ExecutiveAIWorkspace /></ReservedSuperAdminRoute>} />
+diff --git a/frontend/src/components/Layout/Sidebar.jsx b/frontend/src/components/Layout/Sidebar.jsx
+--- a/frontend/src/components/Layout/Sidebar.jsx
++++ b/frontend/src/components/Layout/Sidebar.jsx
+@@ -174,8 +174,11 @@ const SIDEBAR_SECTIONS = [
+     items: [
+       { path: '/reports', label: 'Reports', icon: '📑', roles: REPORT_ROLES },
+       { path: '/documents', label: 'Documents', icon: '📄', roles: ALL_ROLES },
++      { path: '/system-control-center', label: 'System Control', icon: '🧭', roles: ['SUPER_ADMIN'], reservedOnly: true },
++      { path: '/pending-actions', label: 'Pending Actions', icon: '⏳', roles: ['SUPER_ADMIN'], reservedOnly: true },
++      { path: '/recovery-center', label: 'Recovery Center', icon: '↩️', roles: ['SUPER_ADMIN'], reservedOnly: true },
+       { path: '/deletion-center', label: 'Recycle Bin', icon: '♻️', roles: ['SUPER_ADMIN'], reservedOnly: true },
+       { path: '/audit-center', label: 'Audit Center', icon: '🛡️', roles: ['SUPER_ADMIN'], reservedOnly: true },
+@@ -205,7 +208,8 @@ const Sidebar = ({ isOpen, onClose }) => {
+     items: section.items.filter((item) => {
+       const roleAllowed = item.roles.includes(user?.role);
+       const emailAllowed = !item.emails || item.emails.map((email) => String(email).toLowerCase()).includes(normalizedEmail);
+-      return roleAllowed && emailAllowed;
++      const reservedAllowed = !item.reservedOnly || isAllowedAgentSuperAdmin(user);
++      return roleAllowed && emailAllowed && reservedAllowed;
+     })
+   })).filter((section) => section.items.length > 0);
+diff --git a/frontend/src/pages/RecoveryCenter.jsx b/frontend/src/pages/RecoveryCenter.jsx
+--- a/frontend/src/pages/RecoveryCenter.jsx
++++ b/frontend/src/pages/RecoveryCenter.jsx
+@@ -63,8 +63,8 @@ const RecoveryCenter = () => {
+     setError('');
+     setNotice('');
+     try {
+-      await api.post(`/recovery/events/${undoTarget.id}/undo`, { note: note.trim() || undefined });
+-      setNotice('Recovery completed safely. The original audit event was preserved and a new UNDO event was recorded.');
++      const response = await api.post(`/recovery/events/${undoTarget.id}/undo`, { note: note.trim() });
++      setNotice(response?.data?.message || 'Undo request submitted to Pending Actions.');
+@@ -184,7 +184,7 @@ const RecoveryCenter = () => {
+             <p>The original audit event will remain unchanged. THRS will restore the supported state only after the governance gate allows the reversal.</p>
+             <label>
+-              <span>Recovery note · optional</span>
++              <span>Governance reason · required</span>
+               <textarea value={note} onChange={(event) => setNote(event.target.value)} maxLength={1000} placeholder="Reason or governance note…" />
+             </label>
+@@ -192,7 +192,7 @@ const RecoveryCenter = () => {
+               <button type="button" disabled={submitting} onClick={() => { setUndoTarget(null); setNote(''); }}>Cancel</button>
+-              <button type="button" className="is-primary" disabled={submitting} onClick={submitUndo}>{submitting ? 'Reversing…' : 'Confirm Undo'}</button>
++              <button type="button" className="is-primary" disabled={submitting || note.trim().length < 3} onClick={submitUndo}>{submitting ? 'Submitting…' : 'Request Undo'}</button>
+             </div>
+           </div>
+         </div>
+diff --git a/frontend/src/pages/DeletionCenter.jsx b/frontend/src/pages/DeletionCenter.jsx
+--- a/frontend/src/pages/DeletionCenter.jsx
++++ b/frontend/src/pages/DeletionCenter.jsx
+@@ -354,7 +354,7 @@ const DeletionCenter = () => {
+             </div>
+             <label>
+-              <span>Review note</span>
++              <span>{review.mode === 'restore' ? 'Review note' : 'Governance reason · required'}</span>
+               <textarea
+@@ -371,7 +371,7 @@ const DeletionCenter = () => {
+               <button
+                 type="button"
+-                disabled={submitting}
++                disabled={submitting || (review.mode !== 'restore' && reviewNote.trim().length < 3)}
+                 className={review.mode === 'restore' ? 'is-restore' : 'is-confirm'}
