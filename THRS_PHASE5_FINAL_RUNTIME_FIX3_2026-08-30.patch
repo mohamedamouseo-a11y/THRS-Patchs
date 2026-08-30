@@ -1,0 +1,83 @@
+diff --git a/backend/src/controllers/deletion.controller.js b/backend/src/controllers/deletion.controller.js
+--- a/backend/src/controllers/deletion.controller.js
++++ b/backend/src/controllers/deletion.controller.js
+@@ -1,5 +1,6 @@
+ 'use strict';
+ 
+ const prisma = require('../config/database');
+-const { reviewDeletion, requestGovernanceAction } = require('../services/deletion.service');
++const { reviewDeletion } = require('../services/deletion.service');
++const { requestGovernanceAction } = require('../services/governance.service');
+ 
+ const MAX_PAGE_SIZE = 100;
+diff --git a/backend/src/controllers/employee.controller.js b/backend/src/controllers/employee.controller.js
+--- a/backend/src/controllers/employee.controller.js
++++ b/backend/src/controllers/employee.controller.js
+@@ -824,9 +824,8 @@ exports.updateEmployee = async (req, res, next) => {
+   try {
+     const { id } = req.params;
+     await assertEntityVisible('EMPLOYEE', id);
+     const data = normalizeEmployeePayload({ ...req.body });
+ 
+-    await assertEntityVisible('EMPLOYEE', id);
+     if (req.file) {
+       data.photo = req.file.path;
+     }
+diff --git a/frontend/src/components/Layout/Sidebar.jsx b/frontend/src/components/Layout/Sidebar.jsx
+--- a/frontend/src/components/Layout/Sidebar.jsx
++++ b/frontend/src/components/Layout/Sidebar.jsx
+@@ -201,7 +201,8 @@ const Sidebar = ({ isOpen, onClose }) => {
+     items: section.items.filter((item) => {
+       const roleAllowed = item.roles.includes(user?.role);
+       const emailAllowed = !item.emails || item.emails.map((email) => String(email).toLowerCase()).includes(normalizedEmail);
+-      return roleAllowed && emailAllowed;
++      const reservedAllowed = !item.reservedOnly || isAllowedAgentSuperAdmin(user);
++      return roleAllowed && emailAllowed && reservedAllowed;
+     })
+   })).filter((section) => section.items.length > 0);
+diff --git a/frontend/src/pages/RecoveryCenter.jsx b/frontend/src/pages/RecoveryCenter.jsx
+--- a/frontend/src/pages/RecoveryCenter.jsx
++++ b/frontend/src/pages/RecoveryCenter.jsx
+@@ -66,13 +66,13 @@ const RecoveryCenter = () => {
+     setError('');
+     setNotice('');
+     try {
+-      await api.post(`/recovery/events/${undoTarget.id}/undo`, { note: note.trim() || undefined });
++      const response = await api.post(`/recovery/events/${undoTarget.id}/undo`, { note: note.trim() || undefined });
+       setNotice(response?.data?.message || 'Undo request submitted to Pending Actions.');
+       setUndoTarget(null);
+       setNote('');
+       setSelected(null);
+       await Promise.all([loadSummary(), loadEvents(pagination.page, pagination.pageSize)]);
+     } catch (requestError) {
+-      setError(requestError?.message || 'Unable to undo this activity.');
++      setError(requestError?.response?.data?.message || requestError?.message || 'Unable to submit this undo request.');
+     } finally {
+       setSubmitting(false);
+     }
+@@ -184,7 +184,7 @@ const RecoveryCenter = () => {
+             <label><span>Governance reason · required</span><textarea value={note} onChange={(event) => setNote(event.target.value)} maxLength={1000} placeholder="Reason or governance note…" /></label>
+             <div className="thrs-recovery-modal-actions">
+               <button type="button" disabled={submitting} onClick={() => { setUndoTarget(null); setNote(''); }}>Cancel</button>
+-              <button type="button" className="is-primary" disabled={submitting} onClick={submitUndo}>{submitting ? 'Reversing…' : 'Confirm Undo'}</button>
++              <button type="button" className="is-primary" disabled={submitting || note.trim().length < 3} onClick={submitUndo}>{submitting ? 'Submitting…' : 'Request Undo'}</button>
+             </div>
+           </div>
+         </div>
+diff --git a/frontend/src/pages/DeletionCenter.jsx b/frontend/src/pages/DeletionCenter.jsx
+--- a/frontend/src/pages/DeletionCenter.jsx
++++ b/frontend/src/pages/DeletionCenter.jsx
+@@ -475,11 +475,11 @@ const DeletionCenter = () => {
+               />
+             </label>
+             <div className="thrs-delete-review-actions">
+-              <button type="button" disabled={submitting || (review.mode !== 'restore' && reviewNote.trim().length < 3)} onClick={() => setReview(null)}>Cancel</button>
++              <button type="button" disabled={submitting} onClick={() => setReview(null)}>Cancel</button>
+               <button
+                 type="button"
+                 disabled={submitting || (review.mode !== 'restore' && reviewNote.trim().length < 3)}
+-                className={review.mode === 'restore' ? 'is-restore' : 'is-confirm'} disabled={submitting || (review.mode !== 'restore' && reviewNote.trim().length < 3)}
++                className={review.mode === 'restore' ? 'is-restore' : 'is-confirm'}
+                 onClick={submitReview}
+               >
+                 {submitting ? 'Processing…' : review.mode === 'restore' ? 'Restore original record' : 'Confirm soft delete'}
