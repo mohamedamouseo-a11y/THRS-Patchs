@@ -1,0 +1,20 @@
+diff --git a/frontend/src/services/api.js b/frontend/src/services/api.js
+--- a/frontend/src/services/api.js
++++ b/frontend/src/services/api.js
+@@ -63,11 +63,11 @@ api.interceptors.response.use(
+         const tokenUsed = error.config?._tokenUsedForRequest;
+         const currentToken = localStorage.getItem("token");
+ 
+-        // Only redirect if the token has NOT changed since the request was sent.
+-        // If currentToken !== tokenUsed it means a fresh login happened while
+-        // this (now-stale) request was in-flight — skip the logout redirect so
+-        // the new session is preserved.
+-        if (!currentToken || currentToken === tokenUsed) {
++        // Redirect to login only for requests that were actually authenticated.
++        // Unauthenticated endpoints such as /auth/login must be allowed to return
++        // their 401 payload to the calling form so the real error can be shown
++        // instead of forcing a full-page reload back to /login.
++        if (tokenUsed && (!currentToken || currentToken === tokenUsed)) {
+           localStorage.removeItem("token");
+           window.location.href = "/login";
+         }
