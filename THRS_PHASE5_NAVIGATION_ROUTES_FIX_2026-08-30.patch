@@ -1,0 +1,16 @@
+diff --git a/frontend/src/App.jsx b/frontend/src/App.jsx
+--- a/frontend/src/App.jsx
++++ b/frontend/src/App.jsx
+@@ -222,6 +222,9 @@ const AppRoutes = () => {
+       <Route path="/help" element={<ProtectedRoute><HelpCenter /></ProtectedRoute>} />
+       <Route path="/settings" element={<ProtectedRoute roles={['SUPER_ADMIN', 'CEO', 'HR_ADMIN']}><Settings /></ProtectedRoute>} />
+-            <Route path="/deletion-center" element={<ReservedSuperAdminRoute><DeletionCenter /></ReservedSuperAdminRoute>} />
+-<Route path="/audit-center" element={<ReservedSuperAdminRoute><AuditCenter /></ReservedSuperAdminRoute>} />
+-<Route path="/executive-ai" element={<ReservedSuperAdminRoute><ExecutiveAIWorkspace /></ReservedSuperAdminRoute>} />
++      <Route path="/system-control-center" element={<ReservedSuperAdminRoute><SystemControlCenter /></ReservedSuperAdminRoute>} />
++      <Route path="/pending-actions" element={<ReservedSuperAdminRoute><GovernancePendingActions /></ReservedSuperAdminRoute>} />
++      <Route path="/recovery-center" element={<ReservedSuperAdminRoute><RecoveryCenter /></ReservedSuperAdminRoute>} />
++      <Route path="/deletion-center" element={<ReservedSuperAdminRoute><DeletionCenter /></ReservedSuperAdminRoute>} />
++      <Route path="/audit-center" element={<ReservedSuperAdminRoute><AuditCenter /></ReservedSuperAdminRoute>} />
++      <Route path="/executive-ai" element={<ReservedSuperAdminRoute><ExecutiveAIWorkspace /></ReservedSuperAdminRoute>} />
+       <Route path="/database-backups/oauth/callback" element={<ReservedSuperAdminRoute><DatabaseBackupOAuthCallback /></ReservedSuperAdminRoute>} />
