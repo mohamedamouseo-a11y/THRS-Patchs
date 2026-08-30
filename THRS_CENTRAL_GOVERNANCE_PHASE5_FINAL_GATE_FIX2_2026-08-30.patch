@@ -1,0 +1,75 @@
+diff --git a/backend/src/controllers/deletion.controller.js b/backend/src/controllers/deletion.controller.js
+--- a/backend/src/controllers/deletion.controller.js
++++ b/backend/src/controllers/deletion.controller.js
+@@ -1,5 +1,6 @@
+ 'use strict';
+ 
+ const prisma = require('../config/database');
+-const { reviewDeletion, requestGovernanceAction } = require('../services/deletion.service');
++const { reviewDeletion } = require('../services/deletion.service');
++const { requestGovernanceAction } = require('../services/governance.service');
+ 
+diff --git a/backend/src/controllers/employee.controller.js b/backend/src/controllers/employee.controller.js
+--- a/backend/src/controllers/employee.controller.js
++++ b/backend/src/controllers/employee.controller.js
+@@ -826,8 +826,7 @@
+     const { id } = req.params;
+     await assertEntityVisible('EMPLOYEE', id);
+     const data = normalizeEmployeePayload({ ...req.body });
+ 
+-    await assertEntityVisible('EMPLOYEE', id);
+     if (req.file) {
+       data.photo = req.file.path;
+     }
+diff --git a/frontend/src/App.jsx b/frontend/src/App.jsx
+--- a/frontend/src/App.jsx
++++ b/frontend/src/App.jsx
+@@ -223,5 +223,8 @@
+       <Route path="/help" element={<ProtectedRoute><HelpCenter /></ProtectedRoute>} />
+       <Route path="/settings" element={<ProtectedRoute roles={['SUPER_ADMIN', 'CEO', 'HR_ADMIN']}><Settings /></ProtectedRoute>} />
+-            <Route path="/deletion-center" element={<ReservedSuperAdminRoute><DeletionCenter /></ReservedSuperAdminRoute>} />
+-<Route path="/audit-center" element={<ReservedSuperAdminRoute><AuditCenter /></ReservedSuperAdminRoute>} />
+-<Route path="/executive-ai" element={<ReservedSuperAdminRoute><ExecutiveAIWorkspace /></ReservedSuperAdminRoute>} />
++      <Route path="/system-control-center" element={<ReservedSuperAdminRoute><SystemControlCenter /></ReservedSuperAdminRoute>} />
++      <Route path="/pending-actions" element={<ReservedSuperAdminRoute><GovernancePendingActions /></ReservedSuperAdminRoute>} />
++      <Route path="/recovery-center" element={<ReservedSuperAdminRoute><RecoveryCenter /></ReservedSuperAdminRoute>} />
++      <Route path="/deletion-center" element={<ReservedSuperAdminRoute><DeletionCenter /></ReservedSuperAdminRoute>} />
++      <Route path="/audit-center" element={<ReservedSuperAdminRoute><AuditCenter /></ReservedSuperAdminRoute>} />
++      <Route path="/executive-ai" element={<ReservedSuperAdminRoute><ExecutiveAIWorkspace /></ReservedSuperAdminRoute>} />
+       <Route path="/database-backups/oauth/callback" element={<ReservedSuperAdminRoute><DatabaseBackupOAuthCallback /></ReservedSuperAdminRoute>} />
+diff --git a/frontend/src/components/Layout/Sidebar.jsx b/frontend/src/components/Layout/Sidebar.jsx
+--- a/frontend/src/components/Layout/Sidebar.jsx
++++ b/frontend/src/components/Layout/Sidebar.jsx
+@@ -207,4 +207,5 @@
+     items: section.items.filter((item) => {
+       const roleAllowed = item.roles.includes(user?.role);
+       const emailAllowed = !item.emails || item.emails.map((email) => String(email).toLowerCase()).includes(normalizedEmail);
+-      return roleAllowed && emailAllowed;
++      const reservedAllowed = !item.reservedOnly || isAllowedAgentSuperAdmin(user);
++      return roleAllowed && emailAllowed && reservedAllowed;
+     })
+diff --git a/frontend/src/pages/RecoveryCenter.jsx b/frontend/src/pages/RecoveryCenter.jsx
+--- a/frontend/src/pages/RecoveryCenter.jsx
++++ b/frontend/src/pages/RecoveryCenter.jsx
+@@ -68,2 +68,2 @@
+-      await api.post(`/recovery/events/${undoTarget.id}/undo`, { note: note.trim() || undefined });
++      const response = await api.post(`/recovery/events/${undoTarget.id}/undo`, { note: note.trim() || undefined });
+       setNotice(response?.data?.message || 'Undo request submitted to Pending Actions.');
+@@ -186,2 +186,2 @@
+               <button type="button" disabled={submitting} onClick={() => { setUndoTarget(null); setNote(''); }}>Cancel</button>
+-              <button type="button" className="is-primary" disabled={submitting} onClick={submitUndo}>{submitting ? 'Reversing…' : 'Confirm Undo'}</button>
++              <button type="button" className="is-primary" disabled={submitting || note.trim().length < 3} onClick={submitUndo}>{submitting ? 'Submitting…' : 'Request Undo'}</button>
+diff --git a/frontend/src/pages/DeletionCenter.jsx b/frontend/src/pages/DeletionCenter.jsx
+--- a/frontend/src/pages/DeletionCenter.jsx
++++ b/frontend/src/pages/DeletionCenter.jsx
+@@ -481,7 +481,7 @@
+             </label>
+             <div className="thrs-delete-review-actions">
+-              <button type="button" disabled={submitting || (review.mode !== 'restore' && reviewNote.trim().length < 3)} onClick={() => setReview(null)}>Cancel</button>
++              <button type="button" disabled={submitting} onClick={() => setReview(null)}>Cancel</button>
+               <button
+                 type="button"
+                 disabled={submitting || (review.mode !== 'restore' && reviewNote.trim().length < 3)}
+-                className={review.mode === 'restore' ? 'is-restore' : 'is-confirm'} disabled={submitting || (review.mode !== 'restore' && reviewNote.trim().length < 3)}
++                className={review.mode === 'restore' ? 'is-restore' : 'is-confirm'}
+                 onClick={submitReview}
