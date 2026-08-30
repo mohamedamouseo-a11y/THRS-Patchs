@@ -1,7 +1,7 @@
 diff --git a/frontend/src/styles/thrs-main-dashboard.css b/frontend/src/styles/thrs-main-dashboard.css
 --- a/frontend/src/styles/thrs-main-dashboard.css
 +++ b/frontend/src/styles/thrs-main-dashboard.css
-@@ -1075,0 +1076,283 @@
+@@ -1075,0 +1076,457 @@
 +
 +/* ========================================================================== */
 +/* V2 LUXURY — Executive Command Center                                       */
