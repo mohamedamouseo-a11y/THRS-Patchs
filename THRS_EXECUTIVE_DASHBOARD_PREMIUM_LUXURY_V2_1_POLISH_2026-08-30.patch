@@ -1,0 +1,510 @@
+diff --git a/frontend/src/styles/thrs-main-dashboard.css b/frontend/src/styles/thrs-main-dashboard.css
+--- a/frontend/src/styles/thrs-main-dashboard.css
++++ b/frontend/src/styles/thrs-main-dashboard.css
+@@ -1532,0 +1533,506 @@
++/* ========================================================================== */
++/* V2.1 LUXURY POLISH — richer executive hierarchy, contrast and depth        */
++/* Builds on V2 Luxury. Visual-only and fully scoped to Executive Dashboard.  */
++/* ========================================================================== */
++
++.thrs-main-dashboard {
++  --lux21-bg-top: #f8f6f1;
++  --lux21-bg-bottom: #e9eef4;
++  --lux21-panel: #ffffff;
++  --lux21-panel-soft: #f5f7fa;
++  --lux21-text: #0b1f36;
++  --lux21-muted: #607086;
++  --lux21-gold: #b98d3f;
++  --lux21-gold-bright: #e1c276;
++  --lux21-gold-wash: rgba(185, 141, 63, .10);
++  --lux21-border: rgba(11, 31, 54, .115);
++  --lux21-shadow: 0 20px 50px rgba(15, 35, 60, .10), 0 3px 10px rgba(15, 35, 60, .045);
++  --lux21-shadow-soft: 0 12px 30px rgba(15, 35, 60, .075);
++  background:
++    radial-gradient(circle at 84% 0%, rgba(198, 159, 83, .14), transparent 22%),
++    radial-gradient(circle at 12% 18%, rgba(37, 76, 126, .065), transparent 24%),
++    linear-gradient(180deg, var(--lux21-bg-top) 0%, #f1f3f6 38%, var(--lux21-bg-bottom) 100%);
++  color: var(--lux21-text);
++}
++
++[data-theme='dark'] .thrs-main-dashboard,
++.dark .thrs-main-dashboard {
++  --lux21-bg-top: #07111e;
++  --lux21-bg-bottom: #030a12;
++  --lux21-panel: #0d1d30;
++  --lux21-panel-soft: #10243a;
++  --lux21-text: #f3f6fa;
++  --lux21-muted: #9aabc0;
++  --lux21-gold: #c9a45c;
++  --lux21-gold-bright: #ebcf87;
++  --lux21-gold-wash: rgba(201, 164, 92, .10);
++  --lux21-border: rgba(226, 234, 244, .105);
++  --lux21-shadow: 0 24px 64px rgba(0, 0, 0, .35), inset 0 1px 0 rgba(255, 255, 255, .025);
++  --lux21-shadow-soft: 0 16px 36px rgba(0, 0, 0, .24);
++  background:
++    radial-gradient(circle at 84% 0%, rgba(201, 164, 92, .11), transparent 23%),
++    radial-gradient(circle at 13% 12%, rgba(41, 86, 147, .12), transparent 24%),
++    linear-gradient(180deg, var(--lux21-bg-top) 0%, #06101c 44%, var(--lux21-bg-bottom) 100%);
++}
++
++/* Page heading */
++.thrs-main-dashboard__page-header {
++  margin-block-end: 22px;
++}
++
++.thrs-main-dashboard__date {
++  color: var(--lux21-gold);
++  font-size: 11px;
++  letter-spacing: .015em;
++}
++
++.thrs-main-dashboard__page-heading h1 {
++  color: var(--lux21-text);
++  font-size: clamp(31px, 2.7vw, 42px);
++  font-weight: 900;
++  letter-spacing: -.045em;
++  text-shadow: 0 1px 0 rgba(255,255,255,.22);
++}
++
++[data-theme='dark'] .thrs-main-dashboard__page-heading h1,
++.dark .thrs-main-dashboard__page-heading h1 {
++  text-shadow: 0 4px 22px rgba(0,0,0,.24);
++}
++
++.thrs-main-dashboard__page-heading > p:last-child {
++  color: var(--lux21-muted);
++  font-size: 13px;
++}
++
++.thrs-main-dashboard__customize {
++  min-height: 43px;
++  padding-inline: 17px;
++  color: #173b63;
++  background: rgba(255,255,255,.92);
++  border-color: rgba(185,141,63,.24);
++  border-radius: 13px;
++  box-shadow: 0 9px 24px rgba(25,48,76,.075), inset 0 1px 0 rgba(255,255,255,.7);
++}
++
++[data-theme='dark'] .thrs-main-dashboard__customize,
++.dark .thrs-main-dashboard__customize {
++  color: #dce7f5;
++  background: rgba(12,29,49,.9);
++  border-color: rgba(201,164,92,.20);
++}
++
++/* Hero: more ceremonial, less generic SaaS */
++.thrs-main-dashboard__hero {
++  min-height: 182px;
++  margin-block-end: 22px;
++  padding: 30px clamp(28px, 3.2vw, 48px);
++  background:
++    radial-gradient(circle at 89% 42%, rgba(224,194,116,.23), transparent 20%),
++    radial-gradient(circle at 68% 120%, rgba(56,105,176,.22), transparent 36%),
++    linear-gradient(112deg, #173f6d 0%, #0a2b4e 46%, #071827 100%);
++  border: 1px solid rgba(226,199,127,.17);
++  border-radius: 26px;
++  box-shadow:
++    0 26px 58px rgba(6,25,45,.24),
++    inset 0 1px 0 rgba(255,255,255,.08);
++}
++
++.thrs-main-dashboard__hero::before {
++  background:
++    linear-gradient(100deg, rgba(255,255,255,.065), transparent 28%),
++    linear-gradient(180deg, rgba(235,207,135,.045), transparent 58%);
++}
++
++.thrs-main-dashboard__hero::after {
++  position: absolute;
++  inset: 8px;
++  content: '';
++  pointer-events: none;
++  border: 1px solid rgba(255,255,255,.035);
++  border-radius: 20px;
++}
++
++.thrs-main-dashboard__hero-kpis {
++  gap: clamp(34px, 4.5vw, 72px);
++}
++
++.thrs-main-dashboard__hero-kpi {
++  gap: 22px;
++}
++
++.thrs-main-dashboard__hero-icon {
++  width: 72px;
++  height: 72px;
++  flex-basis: 72px;
++  color: #f0cd72;
++  background:
++    linear-gradient(145deg, rgba(255,255,255,.10), rgba(255,255,255,.035)),
++    rgba(23,63,109,.42);
++  border: 1px solid rgba(235,207,135,.20);
++  border-radius: 22px;
++  box-shadow:
++    0 10px 26px rgba(0,0,0,.16),
++    inset 0 1px 0 rgba(255,255,255,.10);
++}
++
++.thrs-main-dashboard__hero-label {
++  color: #e8c66e;
++  font-size: 12px;
++  letter-spacing: .01em;
++}
++
++.thrs-main-dashboard__hero-copy strong {
++  margin-block: 7px 9px;
++  font-size: clamp(40px, 3.6vw, 54px);
++  font-weight: 900;
++}
++
++.thrs-main-dashboard__hero-copy small {
++  color: rgba(239,245,252,.72);
++  font-size: 11px;
++}
++
++.thrs-main-dashboard__hero-divider {
++  height: 84px;
++  background: linear-gradient(180deg, transparent, rgba(235,207,135,.28), transparent);
++}
++
++.thrs-main-dashboard__hero-art {
++  filter: drop-shadow(0 14px 24px rgba(0,0,0,.18));
++}
++
++/* KPI row: stronger contrast and richer card material */
++.thrs-main-dashboard__stats-grid {
++  gap: 14px;
++  margin-block-end: 18px;
++}
++
++.thrs-main-dashboard__stat-card {
++  min-height: 154px;
++  padding: 18px 18px 16px;
++  background:
++    linear-gradient(180deg, rgba(255,255,255,.985), rgba(248,250,252,.96));
++  border: 1px solid var(--lux21-border);
++  border-radius: 18px;
++  box-shadow: var(--lux21-shadow-soft);
++}
++
++.thrs-main-dashboard__stat-card::before {
++  position: absolute;
++  inset-inline: 16px;
++  top: 0;
++  height: 2px;
++  content: '';
++  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--stat-accent) 54%, var(--lux21-gold)), transparent);
++  opacity: .65;
++}
++
++[data-theme='dark'] .thrs-main-dashboard__stat-card,
++.dark .thrs-main-dashboard__stat-card {
++  background:
++    linear-gradient(180deg, rgba(15,34,56,.98), rgba(9,24,41,.98)) !important;
++  border-color: var(--lux21-border) !important;
++  box-shadow: var(--lux21-shadow-soft);
++}
++
++.thrs-main-dashboard__stat-card:hover {
++  transform: translateY(-3px);
++  border-color: rgba(185,141,63,.24);
++  box-shadow: var(--lux21-shadow);
++}
++
++.thrs-main-dashboard__stat-icon {
++  width: 39px;
++  height: 39px;
++  flex-basis: 39px;
++  border: 1px solid color-mix(in srgb, var(--stat-accent) 16%, transparent);
++  border-radius: 12px;
++}
++
++.thrs-main-dashboard__stat-title {
++  font-size: 11px;
++  font-weight: 800;
++}
++
++.thrs-main-dashboard__stat-value {
++  margin-block-start: 19px;
++}
++
++.thrs-main-dashboard__stat-value strong {
++  color: var(--lux21-text);
++  font-size: 32px;
++  font-weight: 900;
++}
++
++.thrs-main-dashboard__stat-subtitle {
++  color: var(--lux21-muted);
++  font-size: 10px;
++}
++
++.thrs-main-dashboard__stat-progress {
++  height: 4px;
++}
++
++/* Analytics: clearer main/secondary hierarchy */
++.thrs-main-dashboard__charts-grid {
++  grid-template-columns: minmax(0, 1.22fr) minmax(360px, .78fr);
++  gap: 15px;
++  margin-block-end: 16px;
++}
++
++.thrs-main-dashboard__panel,
++.thrs-main-dashboard__integration-widget {
++  background: var(--lux21-panel) !important;
++  border: 1px solid var(--lux21-border) !important;
++  border-radius: 20px !important;
++  box-shadow: var(--lux21-shadow-soft) !important;
++}
++
++[data-theme='dark'] .thrs-main-dashboard__panel,
++[data-theme='dark'] .thrs-main-dashboard__integration-widget,
++.dark .thrs-main-dashboard__panel,
++.dark .thrs-main-dashboard__integration-widget {
++  background: linear-gradient(180deg, rgba(14,32,52,.98), rgba(9,23,39,.98)) !important;
++  border-color: var(--lux21-border) !important;
++}
++
++.thrs-main-dashboard__panel {
++  padding: 20px;
++}
++
++.thrs-main-dashboard__panel-header {
++  margin-block-end: 16px;
++}
++
++.thrs-main-dashboard__panel-header h2,
++.thrs-main-dashboard__agency-section > h2 {
++  color: var(--lux21-text);
++  font-size: 13px;
++  font-weight: 850;
++}
++
++.thrs-main-dashboard__panel-header h2::before,
++.thrs-main-dashboard__agency-section > h2::before {
++  width: 3px;
++  height: 17px;
++  background: linear-gradient(180deg, var(--lux21-gold-bright), var(--lux21-gold));
++}
++
++.thrs-main-dashboard__charts-grid > .thrs-main-dashboard__panel {
++  min-height: 376px;
++}
++
++.thrs-main-dashboard__chart-wrap {
++  height: 314px;
++}
++
++.thrs-main-dashboard__department-layout {
++  height: 314px;
++}
++
++.thrs-main-dashboard__department-chart {
++  height: 250px;
++}
++
++.thrs-main-dashboard__department-list {
++  max-height: 270px;
++}
++
++.thrs-main-dashboard__department-row {
++  min-height: 29px;
++  font-size: 9.5px;
++}
++
++.thrs-main-dashboard__department-name span {
++  font-weight: 700;
++}
++
++/* Action center: less cramped and more intentional */
++.thrs-main-dashboard__operations-grid {
++  grid-template-columns: minmax(0, .92fr) minmax(0, 1.10fr) minmax(0, 1fr);
++  gap: 14px;
++  margin-block-end: 22px;
++}
++
++.thrs-main-dashboard__operations-grid > * {
++  min-height: 220px;
++}
++
++.thrs-main-dashboard__approval-item,
++.thrs-main-dashboard__quick-action {
++  border-radius: 12px;
++}
++
++.thrs-main-dashboard__approval-item {
++  min-height: 60px;
++  padding: 10px 11px;
++}
++
++.thrs-main-dashboard__approval-copy strong {
++  font-size: 10.5px;
++}
++
++.thrs-main-dashboard__approval-copy small {
++  font-size: 8.5px;
++}
++
++.thrs-main-dashboard__quick-action {
++  min-height: 70px;
++  padding: 11px;
++}
++
++.thrs-main-dashboard__quick-copy strong {
++  font-size: 10px;
++}
++
++.thrs-main-dashboard__quick-copy small {
++  font-size: 8.5px;
++}
++
++/* Agency overview becomes one composed executive zone */
++.thrs-main-dashboard__agency-section {
++  position: relative;
++  margin-block-start: 30px;
++  padding: 20px;
++  background:
++    linear-gradient(180deg, rgba(255,255,255,.60), rgba(247,249,251,.74));
++  border: 1px solid rgba(11,31,54,.08);
++  border-radius: 22px;
++  box-shadow: 0 16px 38px rgba(15,35,60,.055);
++}
++
++[data-theme='dark'] .thrs-main-dashboard__agency-section,
++.dark .thrs-main-dashboard__agency-section {
++  background:
++    linear-gradient(180deg, rgba(12,29,48,.72), rgba(7,19,32,.78));
++  border-color: rgba(226,234,244,.07);
++  box-shadow: inset 0 1px 0 rgba(255,255,255,.018);
++}
++
++.thrs-main-dashboard__agency-section > h2 {
++  margin: 0 0 15px;
++  padding-inline-start: 12px;
++}
++
++.thrs-main-dashboard__agency-grid {
++  gap: 13px;
++}
++
++.thrs-main-dashboard__agency-grid > .thrs-main-dashboard__integration-widget {
++  min-height: 230px;
++  box-shadow: 0 10px 26px rgba(15,35,60,.06) !important;
++}
++
++.thrs-main-dashboard__integration-widget .thrs-integration-widget__title {
++  font-size: 11.5px !important;
++}
++
++.thrs-main-dashboard__integration-widget .thrs-integration-widget__subtitle {
++  font-size: 8.5px !important;
++}
++
++.thrs-main-dashboard__integration-widget .thrs-integration-widget__badge {
++  color: #735722 !important;
++  background: rgba(185,141,63,.10) !important;
++  border: 1px solid rgba(185,141,63,.19) !important;
++}
++
++[data-theme='dark'] .thrs-main-dashboard__integration-widget .thrs-integration-widget__badge,
++.dark .thrs-main-dashboard__integration-widget .thrs-integration-widget__badge {
++  color: #ddc88f !important;
++}
++
++.thrs-main-dashboard__integration-widget .thrs-integration-widget__metric-card,
++.thrs-main-dashboard__integration-widget .thrs-integration-widget__score-card,
++.thrs-main-dashboard__approval-item,
++.thrs-main-dashboard__quick-action {
++  background: var(--lux21-panel-soft) !important;
++  border-color: var(--lux21-border) !important;
++}
++
++[data-theme='dark'] .thrs-main-dashboard__integration-widget .thrs-integration-widget__metric-card,
++[data-theme='dark'] .thrs-main-dashboard__integration-widget .thrs-integration-widget__score-card,
++[data-theme='dark'] .thrs-main-dashboard__approval-item,
++[data-theme='dark'] .thrs-main-dashboard__quick-action,
++.dark .thrs-main-dashboard__integration-widget .thrs-integration-widget__metric-card,
++.dark .thrs-main-dashboard__integration-widget .thrs-integration-widget__score-card,
++.dark .thrs-main-dashboard__approval-item,
++.dark .thrs-main-dashboard__quick-action {
++  background: var(--lux21-panel-soft) !important;
++}
++
++/* Responsive polish */
++@media (max-width: 1280px) {
++  .thrs-main-dashboard__charts-grid {
++    grid-template-columns: minmax(0, 1.12fr) minmax(340px, .88fr);
++  }
++
++  .thrs-main-dashboard__operations-grid {
++    grid-template-columns: repeat(2, minmax(0,1fr));
++  }
++
++  .thrs-main-dashboard__recent-feedback {
++    grid-column: 1 / -1;
++  }
++}
++
++@media (max-width: 1120px) {
++  .thrs-main-dashboard__charts-grid {
++    grid-template-columns: 1fr;
++  }
++}
++
++@media (max-width: 900px) {
++  .thrs-main-dashboard__operations-grid {
++    grid-template-columns: 1fr;
++  }
++
++  .thrs-main-dashboard__recent-feedback {
++    grid-column: auto;
++  }
++
++  .thrs-main-dashboard__agency-section {
++    padding: 16px;
++  }
++}
++
++@media (max-width: 720px) {
++  .thrs-main-dashboard__page-heading h1 {
++    font-size: clamp(28px, 8vw, 35px);
++  }
++
++  .thrs-main-dashboard__hero {
++    padding: 25px 20px;
++    border-radius: 22px;
++  }
++
++  .thrs-main-dashboard__hero-icon {
++    width: 62px;
++    height: 62px;
++    flex-basis: 62px;
++    border-radius: 19px;
++  }
++
++  .thrs-main-dashboard__stats-grid {
++    gap: 12px;
++  }
++
++  .thrs-main-dashboard__chart-wrap {
++    height: 280px;
++  }
++
++  .thrs-main-dashboard__agency-section {
++    padding: 14px;
++    border-radius: 18px;
++  }
++}
++
++@media (max-width: 520px) {
++  .thrs-main-dashboard__stat-card {
++    min-height: 138px;
++  }
++
++  .thrs-main-dashboard__agency-section {
++    margin-inline: -2px;
++  }
++}
