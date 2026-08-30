@@ -1,0 +1,225 @@
+diff --git a/frontend/src/pages/dashboards/ExecutiveDashboard.jsx b/frontend/src/pages/dashboards/ExecutiveDashboard.jsx
+--- a/frontend/src/pages/dashboards/ExecutiveDashboard.jsx
++++ b/frontend/src/pages/dashboards/ExecutiveDashboard.jsx
+@@ -39,4 +39,5 @@
+ } from 'lucide-react';
+ import '../../styles/thrs-main-dashboard.css';
++import '../../styles/thrs-main-dashboard-v3.css';
+ 
+ ChartJS.register(
+@@ -376,7 +377,7 @@
+   };
+ 
+   return (
+-    <main className="thrs-main-dashboard fade-in" dir={direction}>
++    <main className="thrs-main-dashboard thrs-main-dashboard--v3 fade-in" dir={direction}>
+       <header className="thrs-main-dashboard__page-header">
+         <div className="thrs-main-dashboard__page-heading">
+           <p className="thrs-main-dashboard__date"><Sparkles size={15} aria-hidden="true" />{formattedDate}</p>
+@@ -389,30 +390,71 @@
+         </Link>
+       </header>
+ 
+-      <section className="thrs-main-dashboard__hero" aria-label={copy.totalEmployees}>
+-        <div className="thrs-main-dashboard__hero-kpis">
+-          <div className="thrs-main-dashboard__hero-kpi">
+-            <span className="thrs-main-dashboard__hero-icon" aria-hidden="true"><Users size={29} /></span>
+-            <div className="thrs-main-dashboard__hero-copy">
+-              <span className="thrs-main-dashboard__hero-label">{copy.totalEmployees}</span>
+-              <strong>{totalEmployees}</strong>
+-              <small>{activeEmployees} {copy.activeEmployees}</small>
++      <section className="thrs-main-dashboard__v3-command" aria-label={copy.totalEmployees}>
++        <div className="thrs-main-dashboard__v3-command-main">
++          <div className="thrs-main-dashboard__v3-command-topline">
++            <span className="thrs-main-dashboard__v3-eyebrow">
++              <Sparkles size={14} aria-hidden="true" />
++              {language === 'ar' ? 'مركز القيادة التنفيذي' : 'Executive command center'}
++            </span>
++            <span className={`thrs-main-dashboard__v3-health ${attendanceRate < 70 ? 'is-critical' : attendanceRate < 90 ? 'is-warning' : 'is-healthy'}`}>
++              <Activity size={14} aria-hidden="true" />
++              {attendanceRate < 70
++                ? (language === 'ar' ? 'الحضور يحتاج تدخل' : 'Attendance needs attention')
++                : attendanceRate < 90
++                  ? (language === 'ar' ? 'الحضور تحت المتابعة' : 'Attendance under watch')
++                  : (language === 'ar' ? 'الحضور مستقر' : 'Attendance healthy')}
++            </span>
++          </div>
++
++          <div className="thrs-main-dashboard__v3-command-body">
++            <div className="thrs-main-dashboard__v3-primary-kpis">
++              <article className="thrs-main-dashboard__v3-primary-kpi">
++                <span className="thrs-main-dashboard__v3-primary-icon" aria-hidden="true"><Users size={25} /></span>
++                <div>
++                  <small>{copy.totalEmployees}</small>
++                  <strong>{totalEmployees}</strong>
++                  <span>{activeEmployees} {copy.activeEmployees}</span>
++                </div>
++              </article>
++              <span className="thrs-main-dashboard__v3-command-divider" aria-hidden="true" />
++              <article className="thrs-main-dashboard__v3-primary-kpi">
++                <span className="thrs-main-dashboard__v3-primary-icon thrs-main-dashboard__v3-primary-icon--rate" aria-hidden="true"><Gauge size={25} /></span>
++                <div>
++                  <small>{copy.attendanceRate}</small>
++                  <strong>{attendanceRate}<em>%</em></strong>
++                  <span>{presentToday} {copy.presentFrom} {activeEmployees}</span>
++                </div>
++              </article>
++            </div>
++            <HeroArtwork />
++          </div>
++        </div>
++
++        <aside className={`thrs-main-dashboard__v3-attention ${absentToday > 0 ? 'is-active' : 'is-clear'}`}>
++          <div className="thrs-main-dashboard__v3-attention-head">
++            <span className="thrs-main-dashboard__v3-attention-icon" aria-hidden="true"><UserX size={21} /></span>
++            <div>
++              <small>{language === 'ar' ? 'يحتاج انتباهك' : 'Needs your attention'}</small>
++              <strong>{absentToday}</strong>
++              <span>{copy.absentToday}</span>
+             </div>
+           </div>
+-          <span className="thrs-main-dashboard__hero-divider" aria-hidden="true" />
+-          <div className="thrs-main-dashboard__hero-kpi">
+-            <span className="thrs-main-dashboard__hero-icon thrs-main-dashboard__hero-icon--rate" aria-hidden="true"><Gauge size={29} /></span>
+-            <div className="thrs-main-dashboard__hero-copy">
+-              <span className="thrs-main-dashboard__hero-label">{copy.attendanceRate}</span>
+-              <strong>{attendanceRate}<em>%</em></strong>
+-              <small>{presentToday} {copy.presentFrom} {activeEmployees}</small>
+-            </div>
+-          </div>
+-        </div>
+-        <HeroArtwork />
++          <p>
++            {absentToday > 0
++              ? (language === 'ar'
++                ? `${absentRate.toFixed(1)}% من الفريق النشط غير مسجل حضور اليوم.`
++                : `${absentRate.toFixed(1)}% of the active workforce is not checked in today.`)
++              : (language === 'ar' ? 'لا توجد حالات غياب تحتاج إجراء الآن.' : 'No absence exceptions require action right now.')}
++          </p>
++          <Link to="/attendance">
++            {language === 'ar' ? 'مراجعة الحضور' : 'Review attendance'}
++            <ChevronRight size={16} aria-hidden="true" style={{ transform: isRtl ? 'rotate(180deg)' : undefined }} />
++          </Link>
++        </aside>
+       </section>
+ 
+-      <section className="thrs-main-dashboard__stats-grid" aria-label={copy.totalEmployees}>
++      <section className="thrs-main-dashboard__v3-metric-ribbon" aria-label={copy.totalEmployees}>
+         <StatCard icon={UserCheck} tone="present" title={copy.presentToday} value={presentToday} subtitle={`${attendanceRate}% ${copy.ofTeam}`} progress={attendanceRate} />
+         <StatCard icon={UserX} tone="absent" title={copy.absentToday} value={absentToday} subtitle={`${absentRate.toFixed(1)}% ${copy.ofTeam}`} progress={absentRate} />
+         <StatCard icon={Clock} tone="late" title={copy.late} value={lateToday} subtitle={`${lateRate.toFixed(1)}% ${copy.ofTeam}`} progress={lateRate} />
+@@ -421,5 +463,5 @@
+       </section>
+ 
+       <section className="thrs-main-dashboard__charts-grid">
+-        <DashboardPanel title={copy.attendanceTrend}>
++        <DashboardPanel title={copy.attendanceTrend} className="thrs-main-dashboard__v3-attendance-panel">
+           <div className="thrs-main-dashboard__chart-wrap">
+@@ -468,4 +510,14 @@
+ 
+-        <DashboardPanel title={copy.departmentDistribution}>
++        <DashboardPanel title={copy.departmentDistribution} className="thrs-main-dashboard__v3-workforce-panel">
++          <div className="thrs-main-dashboard__v3-workforce-summary">
++            <div>
++              <small>{language === 'ar' ? 'القوى العاملة النشطة' : 'Active workforce'}</small>
++              <strong>{activeEmployees}</strong>
++            </div>
++            <div>
++              <small>{language === 'ar' ? 'الأقسام' : 'Departments'}</small>
++              <strong>{departmentDistribution.length}</strong>
++            </div>
++          </div>
+           <div className="thrs-main-dashboard__department-layout">
+             <div className="thrs-main-dashboard__department-chart">
+@@ -501,44 +553,55 @@
+         </DashboardPanel>
+       </section>
+ 
+-      <section className="thrs-main-dashboard__operations-grid">
+-        <DashboardPanel
+-          title={copy.pendingApprovals}
+-          action={<Link className="thrs-main-dashboard__panel-action" to="/approvals">{copy.viewAll}</Link>}
+-        >
+-          <div className="thrs-main-dashboard__approval-list">
+-            <ApprovalItem icon={Calendar} title={copy.leaveRequests} description={copy.awaitingApproval} count={pendingApprovals.leaves || 0} to="/leaves" isRtl={isRtl} />
+-            <ApprovalItem icon={Clock} title={copy.attendanceCorrections} description={copy.reviewRecords} count={pendingApprovals.corrections || 0} to="/approvals" isRtl={isRtl} />
+-          </div>
+-          <span className="thrs-main-dashboard__tasks-note">{pendingCount} {copy.tasks}</span>
+-        </DashboardPanel>
++      <section className="thrs-main-dashboard__v3-action-center">
++        <div className="thrs-main-dashboard__v3-section-heading">
++          <span>{language === 'ar' ? 'مركز الإجراءات' : 'Action center'}</span>
++          <h2>{language === 'ar' ? 'ما يحتاج قرارك الآن' : 'What needs your decision now'}</h2>
++          <p>{language === 'ar' ? 'الموافقات والإجراءات السريعة وإشارات رضا العملاء في مساحة تنفيذية واحدة.' : 'Approvals, quick commands, and client feedback signals in one executive workspace.'}</p>
++        </div>
++        <div className="thrs-main-dashboard__operations-grid">
++          <DashboardPanel
++            title={copy.pendingApprovals}
++            action={<Link className="thrs-main-dashboard__panel-action" to="/approvals">{copy.viewAll}</Link>}
++          >
++            <div className="thrs-main-dashboard__approval-list">
++              <ApprovalItem icon={Calendar} title={copy.leaveRequests} description={copy.awaitingApproval} count={pendingApprovals.leaves || 0} to="/leaves" isRtl={isRtl} />
++              <ApprovalItem icon={Clock} title={copy.attendanceCorrections} description={copy.reviewRecords} count={pendingApprovals.corrections || 0} to="/approvals" isRtl={isRtl} />
++            </div>
++            <span className="thrs-main-dashboard__tasks-note">{pendingCount} {copy.tasks}</span>
++          </DashboardPanel>
+ 
+-        <DashboardPanel title={copy.quickActions}>
+-          <div className="thrs-main-dashboard__quick-grid">
+-            <QuickAction icon={Users} tone="blue" title={copy.employeeManagement} description={copy.viewTeam} to="/employees" />
+-            <QuickAction icon={BarChart3} tone="violet" title={copy.reports} description={copy.companyAnalytics} to="/reports" />
+-            <QuickAction icon={Wallet} tone="cyan" title={copy.payroll} description={copy.processPayroll} to="/payroll" />
+-            <QuickAction icon={Briefcase} tone="indigo" title={copy.recruitment} description={copy.jobApplications} to="/recruitment" />
+-          </div>
+-        </DashboardPanel>
++          <DashboardPanel title={copy.quickActions}>
++            <div className="thrs-main-dashboard__quick-grid">
++              <QuickAction icon={Users} tone="blue" title={copy.employeeManagement} description={copy.viewTeam} to="/employees" />
++              <QuickAction icon={BarChart3} tone="violet" title={copy.reports} description={copy.companyAnalytics} to="/reports" />
++              <QuickAction icon={Wallet} tone="cyan" title={copy.payroll} description={copy.processPayroll} to="/payroll" />
++              <QuickAction icon={Briefcase} tone="indigo" title={copy.recruitment} description={copy.jobApplications} to="/recruitment" />
++            </div>
++          </DashboardPanel>
+ 
+-        <SatisfactionWidget
+-          className="thrs-main-dashboard__integration-widget thrs-main-dashboard__recent-feedback"
+-          labels={{
+-            title: copy.recentFeedback,
+-            subtitle: copy.recentFeedbackSubtitle,
+-            externalData: copy.externalData,
+-            averageScore: copy.averageScore,
+-            basedOn: copy.basedOn,
+-            clients: copy.clients,
+-            noRecords: copy.noSatisfaction,
+-            unavailable: copy.unavailable,
+-            unavailableHint: copy.unavailableHint,
+-            retry: copy.retry,
+-          }}
+-        />
++          <SatisfactionWidget
++            className="thrs-main-dashboard__integration-widget thrs-main-dashboard__recent-feedback thrs-main-dashboard__v3-feedback"
++            labels={{
++              title: copy.recentFeedback,
++              subtitle: copy.recentFeedbackSubtitle,
++              externalData: copy.externalData,
++              averageScore: copy.averageScore,
++              basedOn: copy.basedOn,
++              clients: copy.clients,
++              noRecords: copy.noSatisfaction,
++              unavailable: copy.unavailable,
++              unavailableHint: copy.unavailableHint,
++              retry: copy.retry,
++            }}
++          />
++        </div>
+       </section>
+ 
+-      <section className="thrs-main-dashboard__agency-section">
+-        <h2>{copy.agencyOverviewSection}</h2>
++      <section className="thrs-main-dashboard__agency-section thrs-main-dashboard__v3-business">
++        <div className="thrs-main-dashboard__v3-section-heading thrs-main-dashboard__v3-section-heading--business">
++          <span>{language === 'ar' ? 'أداء الأعمال' : 'Business performance'}</span>
++          <h2>{copy.agencyOverviewSection}</h2>
++          <p>{language === 'ar' ? 'قراءة هادئة لمؤشرات العملاء والتسليم ورضا العملاء بدون تشتيت بصري.' : 'A quieter executive read on clients, delivery performance, and satisfaction without dashboard noise.'}</p>
++        </div>
+         <div className="thrs-main-dashboard__agency-grid">
