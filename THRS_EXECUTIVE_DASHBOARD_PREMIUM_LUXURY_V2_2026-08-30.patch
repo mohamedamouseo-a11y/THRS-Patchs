@@ -1,0 +1,461 @@
+diff --git a/frontend/src/styles/thrs-main-dashboard.css b/frontend/src/styles/thrs-main-dashboard.css
+--- a/frontend/src/styles/thrs-main-dashboard.css
++++ b/frontend/src/styles/thrs-main-dashboard.css
+@@ -1075,0 +1076,283 @@
++
++/* ========================================================================== */
++/* V2 LUXURY — Executive Command Center                                       */
++/* Premium visual layer only. Page-scoped, no data/logic/navigation changes.  */
++/* ========================================================================== */
++
++.thrs-main-dashboard {
++  --lux-gold: #c9a45c;
++  --lux-gold-bright: #e2c77f;
++  --lux-gold-soft: #f7f0e1;
++  --lux-ink: #10243c;
++  --lux-pearl: #f6f7f8;
++  --lux-card: rgba(255, 255, 255, .94);
++  --lux-card-soft: #f8f9fb;
++  --lux-border: rgba(19, 39, 66, .09);
++  --lux-border-gold: rgba(201, 164, 92, .22);
++  --lux-shadow: 0 18px 48px rgba(17, 37, 63, .075), 0 2px 8px rgba(17, 37, 63, .035);
++  --lux-shadow-hover: 0 24px 58px rgba(17, 37, 63, .115), 0 4px 14px rgba(17, 37, 63, .045);
++  padding: clamp(24px, 2.35vw, 36px);
++  background:
++    radial-gradient(circle at 90% -2%, rgba(201, 164, 92, .10), transparent 24%),
++    radial-gradient(circle at 8% 14%, rgba(38, 79, 132, .045), transparent 25%),
++    linear-gradient(180deg, #fbfbfa 0%, var(--lux-pearl) 44%, #f1f4f7 100%);
++}
++
++[data-theme='dark'] .thrs-main-dashboard,
++.dark .thrs-main-dashboard {
++  --lux-ink: #f2f5f8;
++  --lux-pearl: #050c15;
++  --lux-card: rgba(9, 23, 39, .94);
++  --lux-card-soft: #0b1b2e;
++  --lux-border: rgba(218, 227, 239, .085);
++  --lux-border-gold: rgba(226, 199, 127, .18);
++  --lux-shadow: 0 22px 54px rgba(0, 0, 0, .30), inset 0 1px 0 rgba(255, 255, 255, .025);
++  --lux-shadow-hover: 0 28px 68px rgba(0, 0, 0, .40), inset 0 1px 0 rgba(255, 255, 255, .035);
++  background:
++    radial-gradient(circle at 91% -1%, rgba(201, 164, 92, .10), transparent 25%),
++    radial-gradient(circle at 8% 16%, rgba(36, 82, 136, .12), transparent 28%),
++    linear-gradient(180deg, #07111e 0%, #050d17 48%, #030911 100%);
++}
++
++/* Header / executive hierarchy */
++.thrs-main-dashboard__page-header {
++  align-items: flex-end;
++  gap: 28px;
++  margin-block-end: 24px;
++}
++
++.thrs-main-dashboard__date {
++  gap: 8px;
++  margin-block-end: 9px;
++  color: #a98139;
++  font-size: 11px;
++  font-weight: 760;
++  letter-spacing: .015em;
++}
++
++.thrs-main-dashboard__page-heading h1 {
++  color: var(--lux-ink);
++  font-size: clamp(31px, 3vw, 44px);
++  font-weight: 900;
++  letter-spacing: -.045em;
++}
++
++.thrs-main-dashboard__page-heading > p:last-child {
++  max-width: 820px;
++  margin-block-start: 9px;
++  color: var(--main-db-muted);
++  font-size: 12.5px;
++  line-height: 1.7;
++}
++
++.thrs-main-dashboard__customize {
++  min-height: 44px;
++  padding-inline: 17px;
++  color: #193857;
++  background: linear-gradient(180deg, rgba(255,255,255,.98), rgba(250,249,246,.94));
++  border: 1px solid var(--lux-border-gold);
++  border-radius: 13px;
++  box-shadow: 0 10px 24px rgba(20, 43, 70, .06), inset 0 1px 0 rgba(255,255,255,.92);
++  font-size: 10.5px;
++  font-weight: 800;
++}
++
++[data-theme='dark'] .thrs-main-dashboard__customize,
++.dark .thrs-main-dashboard__customize {
++  color: #e8edf3;
++  background: linear-gradient(180deg, rgba(18,39,64,.94), rgba(10,25,43,.94));
++  box-shadow: 0 14px 28px rgba(0,0,0,.22), inset 0 1px 0 rgba(255,255,255,.04);
++}
++
++.thrs-main-dashboard__customize:hover {
++  transform: translateY(-2px);
++  border-color: rgba(201,164,92,.48);
++  box-shadow: 0 16px 32px rgba(20,43,70,.11), 0 0 0 3px rgba(201,164,92,.055);
++}
++
++/* Hero command bar */
++.thrs-main-dashboard__hero {
++  isolation: isolate;
++  min-height: 178px;
++  gap: 34px;
++  margin-block-end: 16px;
++  padding: 30px clamp(30px, 3.2vw, 48px);
++  background:
++    radial-gradient(circle at 89% 44%, rgba(226,199,127,.22), transparent 19%),
++    radial-gradient(circle at 70% 120%, rgba(33,80,139,.32), transparent 30%),
++    linear-gradient(118deg, #12375f 0%, #0a2746 43%, #061a31 72%, #04111f 100%);
++  border: 1px solid rgba(226,199,127,.18);
++  border-radius: 26px;
++  box-shadow: 0 26px 64px rgba(5,27,51,.22), inset 0 1px 0 rgba(255,255,255,.06);
++}
++
++.thrs-main-dashboard__hero::before {
++  background:
++    linear-gradient(115deg, rgba(255,255,255,.055), transparent 31%),
++    linear-gradient(90deg, transparent 0%, rgba(226,199,127,.028) 48%, transparent 100%);
++}
++
++.thrs-main-dashboard__hero::after {
++  position: absolute;
++  inset: 0;
++  z-index: -1;
++  content: '';
++  pointer-events: none;
++  border-radius: inherit;
++  box-shadow: inset 0 0 0 1px rgba(255,255,255,.022), inset 0 -40px 80px rgba(0,0,0,.10);
++}
++
++.thrs-main-dashboard__hero-kpis {
++  gap: clamp(34px, 5vw, 76px);
++}
++
++.thrs-main-dashboard__hero-kpi {
++  flex-basis: 350px;
++  gap: 22px;
++}
++
++.thrs-main-dashboard__hero-icon {
++  width: 70px;
++  height: 70px;
++  flex-basis: 70px;
++  color: var(--lux-gold-bright);
++  background: linear-gradient(145deg, rgba(226,199,127,.14), rgba(255,255,255,.045));
++  border: 1px solid rgba(226,199,127,.18);
++  border-radius: 22px;
++  box-shadow: inset 0 1px 0 rgba(255,255,255,.07), 0 14px 28px rgba(0,0,0,.10);
++}
++
++.thrs-main-dashboard__hero-icon--rate {
++  color: #dfe8f4;
++  background: linear-gradient(145deg, rgba(69,111,168,.26), rgba(255,255,255,.04));
++  border-color: rgba(151,180,218,.16);
++}
++
++.thrs-main-dashboard__hero-label {
++  color: #e1c476;
++  font-size: 11.5px;
++  font-weight: 820;
++  letter-spacing: .015em;
++}
++
++.thrs-main-dashboard__hero-copy strong {
++  margin-block: 7px 8px;
++  font-size: clamp(39px, 3.8vw, 54px);
++  font-weight: 900;
++}
++
++.thrs-main-dashboard__hero-copy small {
++  color: rgba(233,240,249,.68);
++  font-size: 10.5px;
++}
++
++.thrs-main-dashboard__hero-divider {
++  height: 82px;
++  background: linear-gradient(180deg, transparent, rgba(226,199,127,.28), transparent);
++}
++
++.thrs-main-dashboard__hero-art {
++  width: clamp(220px, 21vw, 290px);
++  opacity: .82;
++  filter: saturate(.82) brightness(1.05);
++}
++
++/* KPI strip */
++.thrs-main-dashboard__stats-grid {
++  gap: 11px;
++  margin-block-end: 18px;
++}
++
++.thrs-main-dashboard__stat-card {
++  min-height: 148px;
++  padding: 17px 17px 15px;
++  background: var(--lux-card);
++  border: 1px solid var(--lux-border);
++  border-radius: 18px;
++  box-shadow: var(--lux-shadow);
++  backdrop-filter: blur(10px);
++  -webkit-backdrop-filter: blur(10px);
++}
++
++.thrs-main-dashboard__stat-card::before {
++  position: absolute;
++  inset: 0;
++  content: '';
++  pointer-events: none;
++  background: radial-gradient(circle at 92% 0%, color-mix(in srgb, var(--stat-accent) 7%, transparent), transparent 34%);
++}
++
++.thrs-main-dashboard__stat-card:hover {
++  transform: translateY(-3px);
++  border-color: color-mix(in srgb, var(--stat-accent) 20%, var(--lux-border));
++  box-shadow: var(--lux-shadow-hover);
++}
++
++.thrs-main-dashboard__stat-icon {
++  width: 38px;
++  height: 38px;
++  flex-basis: 38px;
++  border: 1px solid color-mix(in srgb, var(--stat-accent) 11%, transparent);
++  border-radius: 12px;
++}
++
++.thrs-main-dashboard__stat-title {
++  font-size: 10.5px;
++  font-weight: 800;
++}
++
++.thrs-main-dashboard__stat-value {
++  margin-block-start: 18px;
++}
++
++.thrs-main-dashboard__stat-value strong {
++  font-size: 31px;
++  font-weight: 900;
++}
++
++.thrs-main-dashboard__stat-progress {
++  height: 3px;
++  opacity: .88;
++}
++
++/* Main analytics */
++.thrs-main-dashboard__charts-grid {
++  grid-template-columns: minmax(0, 1.28fr) minmax(360px, .72fr);
++  gap: 14px;
++  margin-block-end: 14px;
++}
++
++.thrs-main-dashboard__panel,
++.thrs-main-dashboard__integration-widget {
++  background: var(--lux-card) !important;
++  border: 1px solid var(--lux-border) !important;
++  border-radius: 20px !important;
++  box-shadow: var(--lux-shadow) !important;
++  backdrop-filter: blur(10px);
++  -webkit-backdrop-filter: blur(10px);
++}
++
++.thrs-main-dashboard__panel {
++  padding: 19px;
++}
++
++.thrs-main-dashboard__panel-header {
++  min-height: 28px;
++  margin-block-end: 15px;
++}
++
++.thrs-main-dashboard__panel-header h2,
++.thrs-main-dashboard__agency-section > h2 {
++  position: relative;
++  padding-inline-start: 12px;
++  color: var(--lux-ink);
++  font-size: 12.5px;
++  font-weight: 850;
++}
++
++.thrs-main-dashboard__panel-header h2::before,
++.thrs-main-dashboard__agency-section > h2::before {
++  position: absolute;
++  inset-inline-start: 0;
++  top: 50%;
++  width: 3px;
++  height: 15px;
++  content: '';
++  transform: translateY(-50%);
++  background: linear-gradient(180deg, var(--lux-gold-bright), var(--lux-gold));
++  border-radius: 999px;
++  box-shadow: 0 0 12px rgba(201,164,92,.22);
++}
++
++.thrs-main-dashboard__charts-grid > .thrs-main-dashboard__panel {
++  min-height: 350px;
++}
++
++.thrs-main-dashboard__chart-wrap {
++  height: 292px;
++}
++
++.thrs-main-dashboard__department-layout {
++  height: 292px;
++  grid-template-columns: minmax(180px, .88fr) minmax(190px, 1.12fr);
++}
++
++.thrs-main-dashboard__department-chart {
++  height: 238px;
++}
++
++.thrs-main-dashboard__department-row {
++  min-height: 27px;
++}
++
++/* Action center */
++.thrs-main-dashboard__operations-grid {
++  grid-template-columns: minmax(0, .9fr) minmax(0, 1.08fr) minmax(0, 1.02fr);
++  gap: 12px;
++  margin-block-end: 20px;
++}
++
++.thrs-main-dashboard__operations-grid > * {
++  min-height: 204px;
++}
++
++.thrs-main-dashboard__approval-item,
++.thrs-main-dashboard__quick-action,
++.thrs-main-dashboard__integration-widget .thrs-integration-widget__metric-card,
++.thrs-main-dashboard__integration-widget .thrs-integration-widget__score-card {
++  background: color-mix(in srgb, var(--lux-card-soft) 94%, transparent) !important;
++  border-color: var(--lux-border) !important;
++}
++
++.thrs-main-dashboard__approval-item:hover,
++.thrs-main-dashboard__quick-action:hover {
++  transform: translateY(-2px);
++  background: var(--lux-card) !important;
++  border-color: var(--lux-border-gold) !important;
++  box-shadow: 0 10px 24px rgba(17,37,63,.055);
++}
++
++.thrs-main-dashboard__quick-icon {
++  box-shadow: inset 0 1px 0 rgba(255,255,255,.5);
++}
++
++/* External-data zone: quieter but still premium */
++.thrs-main-dashboard__agency-section {
++  margin-block-start: 28px;
++  padding-block-start: 2px;
++}
++
++.thrs-main-dashboard__agency-section > h2 {
++  margin-block-end: 12px;
++}
++
++.thrs-main-dashboard__agency-grid {
++  gap: 12px;
++}
++
++.thrs-main-dashboard__integration-widget {
++  min-height: 222px;
++  padding: 17px !important;
++}
++
++.thrs-main-dashboard__integration-widget .thrs-integration-widget__badge {
++  color: #82662f !important;
++  background: rgba(201,164,92,.09) !important;
++  border: 1px solid rgba(201,164,92,.16) !important;
++}
++
++[data-theme='dark'] .thrs-main-dashboard__integration-widget .thrs-integration-widget__badge,
++.dark .thrs-main-dashboard__integration-widget .thrs-integration-widget__badge {
++  color: #d9c18a !important;
++  background: rgba(201,164,92,.08) !important;
++}
++
++.thrs-main-dashboard__integration-widget .thrs-integration-widget__progress-svg circle:nth-child(2) {
++  stroke: var(--lux-gold) !important;
++}
++
++.thrs-main-dashboard__integration-widget .thrs-integration-widget__score-fill {
++  background: linear-gradient(90deg, #ad8841, var(--lux-gold-bright)) !important;
++}
++
++/* Dark mode separation */
++[data-theme='dark'] .thrs-main-dashboard__panel,
++[data-theme='dark'] .thrs-main-dashboard__stat-card,
++[data-theme='dark'] .thrs-main-dashboard__integration-widget,
++.dark .thrs-main-dashboard__panel,
++.dark .thrs-main-dashboard__stat-card,
++.dark .thrs-main-dashboard__integration-widget {
++  background: linear-gradient(180deg, rgba(12,30,50,.96), rgba(8,22,38,.96)) !important;
++  border-color: rgba(219,229,241,.085) !important;
++}
++
++[data-theme='dark'] .thrs-main-dashboard__approval-item,
++[data-theme='dark'] .thrs-main-dashboard__quick-action,
++.dark .thrs-main-dashboard__approval-item,
++.dark .thrs-main-dashboard__quick-action {
++  background: rgba(13,32,53,.88) !important;
++}
++
++/* Responsive */
++@media (max-width: 1280px) {
++  .thrs-main-dashboard__charts-grid {
++    grid-template-columns: minmax(0, 1.12fr) minmax(340px, .88fr);
++  }
++}
++
++@media (max-width: 1120px) {
++  .thrs-main-dashboard__charts-grid {
++    grid-template-columns: 1fr;
++  }
++}
++
++@media (max-width: 900px) {
++  .thrs-main-dashboard {
++    padding: 20px 16px 30px;
++  }
++  .thrs-main-dashboard__operations-grid {
++    grid-template-columns: 1fr;
++  }
++}
++
++@media (max-width: 720px) {
++  .thrs-main-dashboard__page-header {
++    align-items: flex-start;
++  }
++  .thrs-main-dashboard__page-heading h1 {
++    font-size: clamp(27px, 8vw, 34px);
++  }
++  .thrs-main-dashboard__hero {
++    padding: 24px 20px;
++    border-radius: 22px;
++  }
++  .thrs-main-dashboard__stat-card,
++  .thrs-main-dashboard__panel,
++  .thrs-main-dashboard__integration-widget {
++    border-radius: 17px !important;
++  }
++  .thrs-main-dashboard__department-layout {
++    height: auto;
++  }
++}
++
++@media (max-width: 520px) {
++  .thrs-main-dashboard {
++    padding: 16px 11px 26px;
++  }
++  .thrs-main-dashboard__hero-icon {
++    width: 58px;
++    height: 58px;
++    flex-basis: 58px;
++    border-radius: 18px;
++  }
++  .thrs-main-dashboard__hero-copy strong {
++    font-size: 35px;
++  }
++}
