@@ -1,0 +1,592 @@
+diff --git a/frontend/src/pages/dashboards/ExecutiveDashboard.jsx b/frontend/src/pages/dashboards/ExecutiveDashboard.jsx
+--- a/frontend/src/pages/dashboards/ExecutiveDashboard.jsx
++++ b/frontend/src/pages/dashboards/ExecutiveDashboard.jsx
+@@ -1,3 +1,3 @@
+-import React from 'react';
++import React, { useEffect, useState } from 'react';
+ import { Link } from 'react-router-dom';
+ import { useAuth } from '../../contexts/AuthContext';
+@@ -23,17 +23,21 @@
+ import {
+   Activity,
+   BarChart3,
+   Briefcase,
+   Calendar,
+   ChevronRight,
+   Clock,
++  Command,
+   Gauge,
++  Maximize2,
+   Settings2,
++  SlidersHorizontal,
+   Sparkles,
+   TrendingDown,
+   UserCheck,
+   UserPlus,
+   Users,
+   UserX,
+   Wallet,
++  X,
+ } from 'lucide-react';
+@@ -41,6 +45,7 @@
+ import '../../styles/thrs-main-dashboard-v5.css';
+ import '../../styles/thrs-main-dashboard-v5-1.css';
+ import '../../styles/thrs-main-dashboard-v5-2.css';
+ import '../../styles/thrs-main-dashboard-v6.css';
++import '../../styles/thrs-main-dashboard-v7.css';
+ 
+ ChartJS.register(
+@@ -274,5 +279,26 @@
+   const copy = DASHBOARD_COPY[language === 'ar' ? 'ar' : 'en'];
+   const isRtl = direction === 'rtl';
+   const { data, loading, error } = useDashboardData();
++  const [timeRange, setTimeRange] = useState('7d');
++  const [focusMode, setFocusMode] = useState('overview');
++  const [selectedDepartment, setSelectedDepartment] = useState(null);
++  const [commandOpen, setCommandOpen] = useState(false);
++  const [urgentOnly, setUrgentOnly] = useState(false);
++
++  useEffect(() => {
++    const handleShortcut = (event) => {
++      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
++        event.preventDefault();
++        setCommandOpen((open) => !open);
++      }
++      if (event.key === 'Escape') {
++        setCommandOpen(false);
++        setFocusMode('overview');
++      }
++    };
++
++    window.addEventListener('keydown', handleShortcut);
++    return () => window.removeEventListener('keydown', handleShortcut);
++  }, []);
+ 
+   const firstName = user?.firstName || user?.name?.split?.(' ')?.[0] || '';
+@@ -314,60 +340,86 @@
+   const lateRate = activeEmployees > 0 ? (lateToday / activeEmployees) * 100 : 0;
+   const pendingCount = Number(pendingApprovals.leaves || 0) + Number(pendingApprovals.corrections || 0);
+   const departmentTotal = departmentDistribution.reduce((sum, item) => sum + Number(item.count || 0), 0);
++  const visibleAttendanceTrend = timeRange === 'today' ? attendanceTrend.slice(-1) : attendanceTrend;
++  const turnoverValue = Number(stats.turnoverRate || 0);
++  const healthScore = clampPercent(Math.round(
++    100
++      - Math.min(absentRate * 0.72, 55)
++      - Math.min(lateRate * 0.28, 15)
++      - Math.min(pendingCount * 4, 16)
++      - Math.min(turnoverValue * 0.35, 14)
++  ));
++  const healthState = healthScore >= 85 ? 'excellent' : healthScore >= 65 ? 'stable' : 'attention';
++  const topDepartment = departmentDistribution.reduce((largest, item) => (
++    !largest || Number(item.count || 0) > Number(largest.count || 0) ? item : largest
++  ), null);
++  const topDepartmentShare = topDepartment && departmentTotal > 0
++    ? ((Number(topDepartment.count || 0) / departmentTotal) * 100).toFixed(0)
++    : 0;
++  const executiveInsight = absentToday > 0
++    ? (language === 'ar'
++      ? `${absentRate.toFixed(1)}% من القوى العاملة النشطة غير مسجل حضورها اليوم${topDepartment ? `، وأكبر تجمع للقوى العاملة هو ${topDepartment.department} بنسبة ${topDepartmentShare}%.` : '.'}`
++      : `${absentRate.toFixed(1)}% of the active workforce is not checked in today${topDepartment ? `; ${topDepartment.department} is the largest workforce group at ${topDepartmentShare}%.` : '.'}`)
++    : pendingCount > 0
++      ? (language === 'ar' ? `لديك ${pendingCount} قرارات معلقة تحتاج مراجعة.` : `${pendingCount} pending decisions are waiting for review.`)
++      : (language === 'ar' ? 'لا توجد إشارات تشغيل حرجة تتطلب تدخلك الآن.' : 'No critical operating signals require your attention right now.');
+   const chartText = isDark ? '#c9d6e5' : '#607087';
+   const chartGrid = isDark ? 'rgba(226, 232, 240, 0.08)' : 'rgba(15, 34, 64, 0.07)';
+   const chartPanel = isDark ? '#10213a' : '#ffffff';
+   const departmentColors = ['#1f5fc4', '#3878df', '#5c8deb', '#e25345', '#c99b24', '#d7b452', '#b48055', '#7f91ae', '#6882a5', '#405c80', '#285275', '#92a2b7'];
+ 
+   const attendanceData = {
+-    labels: attendanceTrend.map((item) => new Date(item.date).toLocaleDateString(language === 'ar' ? 'ar-EG' : 'en-US', {
++    labels: visibleAttendanceTrend.map((item) => new Date(item.date).toLocaleDateString(language === 'ar' ? 'ar-EG' : 'en-US', {
+       month: 'short',
+       day: 'numeric',
+     })),
+     datasets: [
+       {
+         label: copy.absent,
+-        data: attendanceTrend.map((item) => Number(item.absent || 0)),
++        data: visibleAttendanceTrend.map((item) => Number(item.absent || 0)),
+         borderColor: '#ef4f4f',
+         backgroundColor: 'rgba(239, 79, 79, 0.10)',
+         fill: true,
+         tension: 0.38,
+         borderWidth: 2.2,
+         pointRadius: 3,
+         pointHoverRadius: 5,
+       },
+       {
+         label: copy.present,
+-        data: attendanceTrend.map((item) => Number(item.present || 0)),
++        data: visibleAttendanceTrend.map((item) => Number(item.present || 0)),
+         borderColor: '#22b66f',
+         backgroundColor: 'rgba(34, 182, 111, 0.05)',
+         fill: false,
+         tension: 0.38,
+         borderWidth: 2.2,
+         pointRadius: 3,
+         pointHoverRadius: 5,
+       },
+       {
+         label: copy.late,
+-        data: attendanceTrend.map((item) => Number(item.late || 0)),
++        data: visibleAttendanceTrend.map((item) => Number(item.late || 0)),
+         borderColor: '#e0a817',
+         backgroundColor: 'rgba(224, 168, 23, 0.05)',
+         fill: false,
+         tension: 0.38,
+         borderWidth: 2.2,
+         pointRadius: 3,
+         pointHoverRadius: 5,
+       },
+     ],
+   };
+ 
+   const departmentData = {
+     labels: departmentDistribution.map((item) => item.department),
+     datasets: [{
+       data: departmentDistribution.map((item) => Number(item.count || 0)),
+-      backgroundColor: departmentDistribution.map((_, index) => departmentColors[index % departmentColors.length]),
++      backgroundColor: departmentDistribution.map((item, index) => {
++        const color = departmentColors[index % departmentColors.length];
++        return !selectedDepartment || selectedDepartment === item.department ? color : `${color}38`;
++      }),
+       borderWidth: 3,
+       borderColor: chartPanel,
+       hoverOffset: 5,
+     }],
+   };
+@@ -382,4 +434,4 @@
+   return (
+-    <main className="thrs-main-dashboard thrs-main-dashboard--v3 thrs-main-dashboard--v4 thrs-main-dashboard--v5 thrs-main-dashboard--v5-1 thrs-main-dashboard--v5-2 thrs-main-dashboard--v6 fade-in" dir={direction}>
++    <main className={`thrs-main-dashboard thrs-main-dashboard--v3 thrs-main-dashboard--v4 thrs-main-dashboard--v5 thrs-main-dashboard--v5-1 thrs-main-dashboard--v5-2 thrs-main-dashboard--v6 thrs-main-dashboard--v7 thrs-main-dashboard--v7-focus-${focusMode} fade-in`} dir={direction}>
+       <header className="thrs-main-dashboard__page-header thrs-main-dashboard__v6-header">
+         <div className="thrs-main-dashboard__page-heading">
+@@ -396,3 +448,65 @@
+       </header>
+ 
++      <section className="thrs-main-dashboard__v7-briefing" aria-label={language === 'ar' ? 'الملخص التنفيذي' : 'Executive briefing'}>
++        <div className="thrs-main-dashboard__v7-briefing-copy">
++          <span><Sparkles size={14} aria-hidden="true" />{language === 'ar' ? 'الملخص التنفيذي' : 'Executive briefing'}</span>
++          <strong>
++            {absentToday > 0
++              ? (language === 'ar' ? `${absentToday} حالة حضور تحتاج انتباهك اليوم` : `${absentToday} attendance exceptions need your attention today`)
++              : pendingCount > 0
++                ? (language === 'ar' ? `${pendingCount} قرارات تنتظر مراجعتك` : `${pendingCount} decisions are waiting for your review`)
++                : (language === 'ar' ? 'الوضع التشغيلي مستقر الآن' : 'Operations are stable right now')}
++          </strong>
++          <p>{executiveInsight}</p>
++        </div>
++
++        <div className="thrs-main-dashboard__v7-health-cluster">
++          <div
++            className={`thrs-main-dashboard__v7-health-score is-${healthState}`}
++            style={{ '--v7-score': `${healthScore * 3.6}deg` }}
++            aria-label={`${language === 'ar' ? 'مؤشر صحة القوى العاملة' : 'Workforce health score'} ${healthScore}`}
++          >
++            <div>
++              <strong>{healthScore}</strong>
++              <small>/100</small>
++            </div>
++          </div>
++          <div className="thrs-main-dashboard__v7-health-copy">
++            <small>{language === 'ar' ? 'صحة القوى العاملة' : 'Workforce health'}</small>
++            <strong>
++              {healthState === 'excellent'
++                ? (language === 'ar' ? 'ممتاز' : 'Excellent')
++                : healthState === 'stable'
++                  ? (language === 'ar' ? 'مستقر' : 'Stable')
++                  : (language === 'ar' ? 'يحتاج انتباه' : 'Needs attention')}
++            </strong>
++          </div>
++        </div>
++
++        <nav className="thrs-main-dashboard__v7-focus-nav" aria-label={language === 'ar' ? 'وضع التركيز' : 'Focus mode'}>
++          {[
++            ['overview', language === 'ar' ? 'نظرة عامة' : 'Overview'],
++            ['workforce', language === 'ar' ? 'القوى العاملة' : 'Workforce'],
++            ['decisions', language === 'ar' ? 'القرارات' : 'Decisions'],
++            ['business', language === 'ar' ? 'الأعمال' : 'Business'],
++          ].map(([value, label]) => (
++            <button
++              type="button"
++              key={value}
++              className={focusMode === value ? 'is-active' : ''}
++              onClick={() => setFocusMode(value)}
++              aria-pressed={focusMode === value}
++            >
++              {label}
++            </button>
++          ))}
++        </nav>
++
++        <button type="button" className="thrs-main-dashboard__v7-command-button" onClick={() => setCommandOpen(true)}>
++          <Command size={17} aria-hidden="true" />
++          <span>{language === 'ar' ? 'الأوامر' : 'Commands'}</span>
++          <kbd>⌘K</kbd>
++        </button>
++      </section>
++
+       <section className="thrs-main-dashboard__v3-command thrs-main-dashboard__v6-command-deck" aria-label={copy.totalEmployees}>
+@@ -500,5 +614,31 @@
+           <div>
+             <span>{language === 'ar' ? 'ذكاء القوى العاملة' : 'Workforce intelligence'}</span>
+             <h2>{language === 'ar' ? 'اتجاهات اليوم في مشهد واحد' : 'Today’s workforce signals in one view'}</h2>
+           </div>
++          <div className="thrs-main-dashboard__v7-intelligence-controls">
++            <div className="thrs-main-dashboard__v7-range-switch" role="group" aria-label={language === 'ar' ? 'الفترة' : 'Time range'}>
++              <button type="button" className={timeRange === 'today' ? 'is-active' : ''} onClick={() => setTimeRange('today')}>
++                {language === 'ar' ? 'اليوم' : 'Today'}
++              </button>
++              <button type="button" className={timeRange === '7d' ? 'is-active' : ''} onClick={() => setTimeRange('7d')}>
++                {language === 'ar' ? '٧ أيام' : '7 days'}
++              </button>
++            </div>
++            {selectedDepartment ? (
++              <button type="button" className="thrs-main-dashboard__v7-selection-chip" onClick={() => setSelectedDepartment(null)}>
++                <span>{selectedDepartment}</span>
++                <X size={13} aria-hidden="true" />
++              </button>
++            ) : null}
++            <button
++              type="button"
++              className="thrs-main-dashboard__v7-focus-button"
++              onClick={() => setFocusMode(focusMode === 'workforce' ? 'overview' : 'workforce')}
++            >
++              <Maximize2 size={14} aria-hidden="true" />
++              {focusMode === 'workforce'
++                ? (language === 'ar' ? 'إنهاء التركيز' : 'Exit focus')
++                : (language === 'ar' ? 'تركيز' : 'Focus')}
++            </button>
++          </div>
+           <div className="thrs-main-dashboard__v6-intelligence-facts">
+@@ -540,3 +680,3 @@
+           <div className="thrs-main-dashboard__chart-wrap">
+-            {attendanceTrend.length ? (
++            {visibleAttendanceTrend.length ? (
+               <Line
+@@ -575,2 +715,11 @@
+           </div>
++          {selectedDepartment ? (
++            <div className="thrs-main-dashboard__v7-department-focus">
++              <span>{language === 'ar' ? 'القسم المحدد' : 'Selected department'}</span>
++              <strong>{selectedDepartment}</strong>
++              <button type="button" onClick={() => setSelectedDepartment(null)} aria-label={language === 'ar' ? 'إلغاء تحديد القسم' : 'Clear department selection'}>
++                <X size={14} aria-hidden="true" />
++              </button>
++            </div>
++          ) : null}
+           <div className="thrs-main-dashboard__department-layout">
+@@ -597,13 +746,19 @@
+                 const count = Number(item.count || 0);
+                 const percent = departmentTotal > 0 ? ((count / departmentTotal) * 100).toFixed(1) : '0.0';
+                 return (
+-                  <div className="thrs-main-dashboard__department-row" role="listitem" key={`${item.department}-${index}`}>
++                  <button
++                    type="button"
++                    className={`thrs-main-dashboard__department-row ${selectedDepartment === item.department ? 'is-selected' : ''}`}
++                    key={`${item.department}-${index}`}
++                    onClick={() => setSelectedDepartment((current) => current === item.department ? null : item.department)}
++                    aria-pressed={selectedDepartment === item.department}
++                  >
+                     <span className="thrs-main-dashboard__department-name">
+                       <i style={{ backgroundColor: departmentColors[index % departmentColors.length] }} />
+                       <span title={item.department}>{item.department}</span>
+                     </span>
+                     <strong>{count}</strong>
+                     <small>({percent}%)</small>
+-                  </div>
++                  </button>
+                 );
+               })}
+@@ -630,6 +785,27 @@
+-      <section className="thrs-main-dashboard__v3-action-center thrs-main-dashboard__v6-decision-console">
++      <section className={`thrs-main-dashboard__v3-action-center thrs-main-dashboard__v6-decision-console ${urgentOnly ? 'is-urgent-only' : ''}`}>
+         <div className="thrs-main-dashboard__v3-section-heading thrs-main-dashboard__v6-decision-heading">
+           <span>{language === 'ar' ? 'قائمة القرار' : 'Decision queue'}</span>
+           <h2>{language === 'ar' ? 'ما يستحق تدخلك الآن' : 'What deserves your attention now'}</h2>
+           <p>{language === 'ar' ? 'الأولوية أولًا: استثناءات الحضور، الموافقات، ثم الأوامر التنفيذية.' : 'Priority first: attendance exceptions, approvals, then executive commands.'}</p>
++          <div className="thrs-main-dashboard__v7-decision-tools">
++            <button
++              type="button"
++              className={urgentOnly ? 'is-active' : ''}
++              onClick={() => setUrgentOnly((value) => !value)}
++              aria-pressed={urgentOnly}
++            >
++              <SlidersHorizontal size={14} aria-hidden="true" />
++              {language === 'ar' ? 'العاجل فقط' : 'Urgent only'}
++            </button>
++            <button
++              type="button"
++              onClick={() => setFocusMode(focusMode === 'decisions' ? 'overview' : 'decisions')}
++              aria-pressed={focusMode === 'decisions'}
++            >
++              <Maximize2 size={14} aria-hidden="true" />
++              {focusMode === 'decisions'
++                ? (language === 'ar' ? 'إنهاء التركيز' : 'Exit focus')
++                : (language === 'ar' ? 'وضع التركيز' : 'Focus mode')}
++            </button>
++          </div>
+         </div>
+@@ -700,4 +876,5 @@
+           <ClientStatsWidget
++            executiveMode
+             className="thrs-main-dashboard__integration-widget"
+             labels={{
+@@ -714,6 +891,8 @@
+               activeClients: copy.activeClients,
+               totalProjects: copy.totalProjects,
+               activeProjects: copy.activeProjects,
++              executiveEmpty: language === 'ar' ? 'لا توجد حركة عملاء أو مشاريع نشطة الآن' : 'No active client or project activity right now',
++              executiveEmptyHint: language === 'ar' ? 'ستظهر المؤشرات تلقائيًا عند وصول بيانات جديدة.' : 'Signals will appear automatically when new activity is available.',
+               unavailable: copy.unavailable,
+               unavailableHint: copy.unavailableHint,
+               retry: copy.retry,
+@@ -730,4 +909,5 @@
+           <DeliveryMetricsWidget
++            executiveMode
+             className="thrs-main-dashboard__integration-widget"
+             labels={{
+@@ -744,6 +924,8 @@
+               avgDeliveryDays: copy.avgDeliveryDays,
+               delayedProjects: copy.delayedProjects,
+               totalDelivered: copy.totalDelivered,
++              executiveEmpty: language === 'ar' ? 'لا توجد حركة تسليم نشطة الآن' : 'No active delivery movement right now',
++              executiveEmptyHint: language === 'ar' ? 'سيظهر أداء التسليم هنا فور توفر نشاط مشاريع.' : 'Delivery performance will appear here as project activity arrives.',
+               unavailable: copy.unavailable,
+               unavailableHint: copy.unavailableHint,
+               retry: copy.retry,
+@@ -760,4 +942,5 @@
+           <SatisfactionWidget
++            executiveMode
+             className="thrs-main-dashboard__integration-widget"
+             labels={{
+@@ -774,6 +957,8 @@
+               basedOn: copy.basedOn,
+               clients: copy.clients,
+               noRecords: copy.noSatisfaction,
++              executiveEmpty: language === 'ar' ? 'لا توجد تقييمات عملاء جديدة الآن' : 'No new client satisfaction signals right now',
++              executiveEmptyHint: language === 'ar' ? 'ستظهر الإشارات هنا عند وصول تقييمات جديدة.' : 'New satisfaction signals will surface here automatically.',
+               unavailable: copy.unavailable,
+               unavailableHint: copy.unavailableHint,
+               retry: copy.retry,
+@@ -800,5 +985,57 @@
+         </div>
+       </section>
++
++      {commandOpen ? (
++        <div className="thrs-main-dashboard__v7-command-backdrop" onMouseDown={() => setCommandOpen(false)}>
++          <section
++            className="thrs-main-dashboard__v7-command-palette"
++            role="dialog"
++            aria-modal="true"
++            aria-label={language === 'ar' ? 'لوحة الأوامر التنفيذية' : 'Executive command palette'}
++            onMouseDown={(event) => event.stopPropagation()}
++          >
++            <header>
++              <div>
++                <span><Command size={15} aria-hidden="true" />{language === 'ar' ? 'أوامر سريعة' : 'Quick commands'}</span>
++                <strong>{language === 'ar' ? 'إلى أين تريد أن تذهب؟' : 'Where do you want to go?'}</strong>
++              </div>
++              <button type="button" onClick={() => setCommandOpen(false)} aria-label={language === 'ar' ? 'إغلاق' : 'Close'}>
++                <X size={18} aria-hidden="true" />
++              </button>
++            </header>
++            <div className="thrs-main-dashboard__v7-command-grid">
++              <Link to="/attendance" onClick={() => setCommandOpen(false)}>
++                <Clock size={18} aria-hidden="true" />
++                <span><strong>{language === 'ar' ? 'مراجعة الحضور' : 'Review attendance'}</strong><small>{absentToday} {copy.absentToday}</small></span>
++              </Link>
++              <Link to="/employees" onClick={() => setCommandOpen(false)}>
++                <Users size={18} aria-hidden="true" />
++                <span><strong>{copy.employeeManagement}</strong><small>{activeEmployees} {copy.activeEmployees}</small></span>
++              </Link>
++              <Link to="/approvals" onClick={() => setCommandOpen(false)}>
++                <UserCheck size={18} aria-hidden="true" />
++                <span><strong>{copy.pendingApprovals}</strong><small>{pendingCount} {copy.tasks}</small></span>
++              </Link>
++              <Link to="/reports" onClick={() => setCommandOpen(false)}>
++                <BarChart3 size={18} aria-hidden="true" />
++                <span><strong>{copy.reports}</strong><small>{copy.companyAnalytics}</small></span>
++              </Link>
++              <Link to="/payroll" onClick={() => setCommandOpen(false)}>
++                <Wallet size={18} aria-hidden="true" />
++                <span><strong>{copy.payroll}</strong><small>{copy.processPayroll}</small></span>
++              </Link>
++              <Link to="/recruitment" onClick={() => setCommandOpen(false)}>
++                <Briefcase size={18} aria-hidden="true" />
++                <span><strong>{copy.recruitment}</strong><small>{copy.jobApplications}</small></span>
++              </Link>
++            </div>
++            <footer>
++              <span>{language === 'ar' ? 'اختصار لوحة المفاتيح' : 'Keyboard shortcut'}</span>
++              <kbd>⌘ K</kbd>
++            </footer>
++          </section>
++        </div>
++      ) : null}
+     </main>
+   );
+ };
+diff --git a/frontend/src/components/integration/ClientStatsWidget.jsx b/frontend/src/components/integration/ClientStatsWidget.jsx
+--- a/frontend/src/components/integration/ClientStatsWidget.jsx
++++ b/frontend/src/components/integration/ClientStatsWidget.jsx
+@@ -12,2 +12,2 @@
+-const ClientStatsWidget = ({ className = '', labels = {} }) => {
++const ClientStatsWidget = ({ className = '', labels = {}, executiveMode = false }) => {
+   const [state, setState] = useState({ loading: true, unavailable: false, data: null });
+@@ -30,4 +30,10 @@
+     loadData();
+   }, []);
+ 
++  const hasActivity = Boolean(
++    Number(state.data?.activeClients || 0)
++      || Number(state.data?.totalProjects || 0)
++      || Number(state.data?.activeProjects || 0)
++  );
++
+   return (
+@@ -37,7 +43,15 @@
+       {!state.loading && !state.unavailable && state.data ? (
+-        <div className="thrs-integration-widget__client-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: '14px' }}>
+-          <StatCard label={labels.activeClients || "Active Clients"} value={state.data.activeClients ?? 0} />
+-          <StatCard label={labels.totalProjects || "Total Projects"} value={state.data.totalProjects ?? 0} />
+-          <StatCard label={labels.activeProjects || "Active Projects"} value={state.data.activeProjects ?? 0} />
+-        </div>
++        executiveMode && !hasActivity ? (
++          <div className="thrs-integration-widget__executive-empty">
++            <span className="thrs-integration-widget__executive-empty-mark" aria-hidden="true" />
++            <strong>{labels.executiveEmpty || "No active business activity right now"}</strong>
++            <small>{labels.executiveEmptyHint || "Signals will appear automatically when new activity is available."}</small>
++          </div>
++        ) : (
++          <div className="thrs-integration-widget__client-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: '14px' }}>
++            <StatCard label={labels.activeClients || "Active Clients"} value={state.data.activeClients ?? 0} />
++            <StatCard label={labels.totalProjects || "Total Projects"} value={state.data.totalProjects ?? 0} />
++            <StatCard label={labels.activeProjects || "Active Projects"} value={state.data.activeProjects ?? 0} />
++          </div>
++        )
+       ) : null}
+diff --git a/frontend/src/components/integration/DeliveryMetricsWidget.jsx b/frontend/src/components/integration/DeliveryMetricsWidget.jsx
+--- a/frontend/src/components/integration/DeliveryMetricsWidget.jsx
++++ b/frontend/src/components/integration/DeliveryMetricsWidget.jsx
+@@ -40,2 +40,2 @@
+-const DeliveryMetricsWidget = ({ className = '', labels = {} }) => {
++const DeliveryMetricsWidget = ({ className = '', labels = {}, executiveMode = false }) => {
+   const [state, setState] = useState({ loading: true, unavailable: false, data: null });
+@@ -59,3 +59,9 @@
+   const onTimeRate = useMemo(() => Number(state.data?.onTimeRate || 0), [state.data]);
++  const hasActivity = Boolean(
++    onTimeRate
++      || Number(state.data?.avgDeliveryDays || 0)
++      || Number(state.data?.delayedProjects || 0)
++      || Number(state.data?.totalDelivered || 0)
++  );
+ 
+   return (
+@@ -65,11 +71,19 @@
+       {!state.loading && !state.unavailable && state.data ? (
+-        <div className="thrs-integration-widget__delivery-grid" style={{ display: 'grid', gridTemplateColumns: '180px repeat(3, minmax(0, 1fr))', gap: '14px', alignItems: 'center' }}>
+-          <div className="thrs-integration-widget__progress" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '10px' }}>
+-            <CircleProgress value={onTimeRate} />
+-            <div className="thrs-integration-widget__progress-label" style={{ fontSize: '13px', color: '#6b7280', fontWeight: 600 }}>{labels.onTimeRate || "On-Time Rate"}</div>
++        executiveMode && !hasActivity ? (
++          <div className="thrs-integration-widget__executive-empty">
++            <span className="thrs-integration-widget__executive-empty-mark" aria-hidden="true" />
++            <strong>{labels.executiveEmpty || "No active delivery movement right now"}</strong>
++            <small>{labels.executiveEmptyHint || "Delivery signals will appear when project activity is available."}</small>
+           </div>
+-          <MetricTile label={labels.avgDeliveryDays || "Avg Delivery Days"} value={state.data.avgDeliveryDays ?? 0} />
+-          <MetricTile label={labels.delayedProjects || "Delayed Projects"} value={state.data.delayedProjects ?? 0} />
+-          <MetricTile label={labels.totalDelivered || "Total Delivered"} value={state.data.totalDelivered ?? 0} />
+-        </div>
++        ) : (
++          <div className="thrs-integration-widget__delivery-grid" style={{ display: 'grid', gridTemplateColumns: '180px repeat(3, minmax(0, 1fr))', gap: '14px', alignItems: 'center' }}>
++            <div className="thrs-integration-widget__progress" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '10px' }}>
++              <CircleProgress value={onTimeRate} />
++              <div className="thrs-integration-widget__progress-label" style={{ fontSize: '13px', color: '#6b7280', fontWeight: 600 }}>{labels.onTimeRate || "On-Time Rate"}</div>
++            </div>
++            <MetricTile label={labels.avgDeliveryDays || "Avg Delivery Days"} value={state.data.avgDeliveryDays ?? 0} />
++            <MetricTile label={labels.delayedProjects || "Delayed Projects"} value={state.data.delayedProjects ?? 0} />
++            <MetricTile label={labels.totalDelivered || "Total Delivered"} value={state.data.totalDelivered ?? 0} />
++          </div>
++        )
+       ) : null}
+diff --git a/frontend/src/components/integration/SatisfactionWidget.jsx b/frontend/src/components/integration/SatisfactionWidget.jsx
+--- a/frontend/src/components/integration/SatisfactionWidget.jsx
++++ b/frontend/src/components/integration/SatisfactionWidget.jsx
+@@ -1,65 +1,73 @@
+ import React, { useEffect, useMemo, useState } from 'react';
+ import integrationService from '../../services/integration.service';
+ import IntegrationWidgetShell, { WidgetSkeleton, WidgetUnavailable } from './IntegrationWidgetShell';
+ 
+-const SatisfactionWidget = ({ className = '', labels = {} }) => {
++const SatisfactionWidget = ({ className = '', labels = {}, executiveMode = false }) => {
+   const [state, setState] = useState({ loading: true, unavailable: false, rows: [] });
+ 
+   const loadData = async () => {
+     setState((prev) => ({ ...prev, loading: true }));
+     try {
+       const response = await integrationService.getClientSatisfaction();
+       if (response?.available === false) {
+         setState({ loading: false, unavailable: true, rows: [] });
+         return;
+       }
+       setState({ loading: false, unavailable: false, rows: Array.isArray(response) ? response : [] });
+     } catch (error) {
+       setState({ loading: false, unavailable: true, rows: [] });
+     }
+   };
+ 
+   useEffect(() => {
+     loadData();
+   }, []);
+ 
+   const average = useMemo(() => {
+     if (!state.rows.length) return 0;
+     return (state.rows.reduce((sum, row) => sum + Number(row.score || 0), 0) / state.rows.length).toFixed(1);
+   }, [state.rows]);
+ 
+   return (
+     <IntegrationWidgetShell className={className} title={labels.title || "Client Satisfaction"} subtitle={labels.subtitle || "Survey snapshot across active clients"} badgeText={labels.externalData || "External Data"}>
+       {state.loading ? <WidgetSkeleton rows={4} /> : null}
+       {!state.loading && state.unavailable ? <WidgetUnavailable onRetry={loadData} title={labels.unavailable} message={labels.unavailableHint} retryLabel={labels.retry} /> : null}
+       {!state.loading && !state.unavailable ? (
+-        <div className="thrs-integration-widget__satisfaction-grid" style={{ display: 'grid', gridTemplateColumns: '160px 1fr', gap: '18px' }}>
++        executiveMode && !state.rows.length ? (
++          <div className="thrs-integration-widget__executive-empty">
++            <span className="thrs-integration-widget__executive-empty-mark" aria-hidden="true" />
++            <strong>{labels.executiveEmpty || "No new client satisfaction signals right now"}</strong>
++            <small>{labels.executiveEmptyHint || "New satisfaction signals will appear automatically."}</small>
++          </div>
++        ) : (
++          <div className="thrs-integration-widget__satisfaction-grid" style={{ display: 'grid', gridTemplateColumns: '160px 1fr', gap: '18px' }}>
+           <div className="thrs-integration-widget__score-card" style={{ borderRadius: '16px', background: '#f8fafc', border: '1px solid #e5e7eb', padding: '18px', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+             <div style={{ color: '#6b7280', fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.04em' }}>{labels.averageScore || "Average Score"}</div>
+             <div style={{ fontSize: '40px', fontWeight: 800, color: '#111827', marginTop: '8px' }}>{average}</div>
+             <div style={{ color: '#6b7280', fontSize: '12px', marginTop: '4px' }}>{labels.basedOn || "Based on"} {state.rows.length} {labels.clients || "clients"}</div>
+           </div>
+           <div className="thrs-integration-widget__satisfaction-list" style={{ display: 'grid', gap: '10px' }}>
+             {state.rows.map((row) => {
+               const width = Math.min(Math.max(Number(row.score || 0) * 20, 0), 100);
+               return (
+                 <div className="thrs-integration-widget__satisfaction-row" key={row.clientName}>
+                   <div className="thrs-integration-widget__satisfaction-row-header" style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px', fontSize: '13px' }}>
+                     <span style={{ color: '#111827', fontWeight: 600 }}>{row.clientName}</span>
+                     <span style={{ color: '#6b7280' }}>{row.score}</span>
+                   </div>
+                   <div className="thrs-integration-widget__score-track" style={{ height: '10px', borderRadius: '999px', background: '#e5e7eb', overflow: 'hidden' }}>
+                     <div className="thrs-integration-widget__score-fill" style={{ width: `${width}%`, height: '100%', background: '#1a3a5c' }} />
+                   </div>
+                 </div>
+               );
+             })}
+             {!state.rows.length ? <div style={{ color: '#6b7280' }}>{labels.noRecords || "No client satisfaction records found."}</div> : null}
+           </div>
+         </div>
++        )
+       ) : null}
+     </IntegrationWidgetShell>
+   );
+ };
+ 
+ export default SatisfactionWidget;
