@@ -1,0 +1,452 @@
+/* THRS Executive Dashboard V5.2 — Final Premium Pass
+   Scope: KPI hierarchy, analytics proportions, Action Center refinement,
+   Business Pulse authority, and stronger surface separation.
+   Visual-only. Scoped to .thrs-main-dashboard--v5-2. */
+
+.thrs-main-dashboard--v5-2 {
+  --v52-ink: #06192b;
+  --v52-muted: #667789;
+  --v52-gold: #b7904b;
+  --v52-gold-hi: #e6c980;
+  --v52-danger: #d35e4c;
+  --v52-line: rgba(6, 25, 43, .105);
+  --v52-ivory: #fffdf8;
+  --v52-stone: #f2eee6;
+  --v52-navy: #082a48;
+  --v52-navy-2: #061f36;
+  --v52-deep: #041523;
+  --v52-shadow: 0 28px 72px rgba(7, 27, 45, .105), 0 4px 14px rgba(7, 27, 45, .035);
+}
+
+[data-theme='dark'] .thrs-main-dashboard--v5-2,
+.dark .thrs-main-dashboard--v5-2 {
+  --v52-ink: #f5f8fa;
+  --v52-muted: #9aabba;
+  --v52-line: rgba(228, 236, 243, .095);
+  --v52-shadow: 0 30px 78px rgba(0, 0, 0, .32);
+}
+
+/* Keep the strong V5 hero. Tighten the hand-off into the dashboard. */
+.thrs-main-dashboard--v5-2 .thrs-main-dashboard__page-header {
+  margin-block-end: 8px;
+}
+.thrs-main-dashboard--v5-2 .thrs-main-dashboard__v3-command {
+  margin-block-end: 16px;
+}
+
+/* KPI strip — one critical signal, four secondary indicators. */
+.thrs-main-dashboard--v5-2 .thrs-main-dashboard__v3-metric-ribbon {
+  display: grid;
+  grid-template-columns: minmax(310px, 2.35fr) repeat(4, minmax(135px, 1fr));
+  gap: 10px;
+  align-items: stretch;
+  margin-block-end: 22px;
+}
+.thrs-main-dashboard--v5-2 .thrs-main-dashboard__v3-metric-ribbon .thrs-main-dashboard__stat-card:nth-child(n) {
+  grid-column: auto;
+  order: 0;
+  min-height: 126px;
+  padding: 18px 18px 16px;
+}
+.thrs-main-dashboard--v5-2 .thrs-main-dashboard__v3-metric-ribbon .thrs-main-dashboard__stat-card:nth-child(2) {
+  position: relative;
+  order: -1;
+  min-height: 146px;
+  padding: 20px 23px 18px;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 100% 0%, rgba(211, 94, 76, .13), transparent 37%),
+    linear-gradient(135deg, #fff8f3 0%, #fffdf9 68%) !important;
+  border: 1px solid rgba(211, 94, 76, .27) !important;
+  box-shadow: 0 18px 44px rgba(152, 61, 45, .10) !important;
+}
+.thrs-main-dashboard--v5-2 .thrs-main-dashboard__v3-metric-ribbon .thrs-main-dashboard__stat-card:nth-child(2)::before {
+  position: absolute;
+  inset-block: 0;
+  inset-inline-start: 0;
+  width: 4px;
+  content: '';
+  background: linear-gradient(180deg, #ed846f, #c84e3e);
+}
+.thrs-main-dashboard--v5-2 .thrs-main-dashboard__v3-metric-ribbon .thrs-main-dashboard__stat-card:nth-child(2) .thrs-main-dashboard__stat-title {
+  font-size: 11.5px;
+  font-weight: 830;
+}
+.thrs-main-dashboard--v5-2 .thrs-main-dashboard__v3-metric-ribbon .thrs-main-dashboard__stat-card:nth-child(2) .thrs-main-dashboard__stat-value strong {
+  font-size: 50px;
+  line-height: .96;
+  color: var(--v52-danger);
+}
+.thrs-main-dashboard--v5-2 .thrs-main-dashboard__v3-metric-ribbon .thrs-main-dashboard__stat-card:not(:nth-child(2)) {
+  background: rgba(255, 253, 248, .92) !important;
+  border-color: var(--v52-line) !important;
+  box-shadow: 0 10px 26px rgba(8, 28, 47, .045) !important;
+}
+.thrs-main-dashboard--v5-2 .thrs-main-dashboard__v3-metric-ribbon .thrs-main-dashboard__stat-card:not(:nth-child(2)) .thrs-main-dashboard__stat-value strong {
+  font-size: 30px;
+}
+.thrs-main-dashboard--v5-2 .thrs-main-dashboard__stat-subtitle {
+  font-size: 9.5px;
+  line-height: 1.45;
+}
+
+[data-theme='dark'] .thrs-main-dashboard--v5-2 .thrs-main-dashboard__v3-metric-ribbon .thrs-main-dashboard__stat-card:nth-child(2),
+.dark .thrs-main-dashboard--v5-2 .thrs-main-dashboard__v3-metric-ribbon .thrs-main-dashboard__stat-card:nth-child(2) {
+  background:
+    radial-gradient(circle at 100% 0%, rgba(211, 94, 76, .13), transparent 38%),
+    linear-gradient(145deg, #12283d, #0a1c2c) !important;
+  border-color: rgba(211, 94, 76, .25) !important;
+}
+[data-theme='dark'] .thrs-main-dashboard--v5-2 .thrs-main-dashboard__v3-metric-ribbon .thrs-main-dashboard__stat-card:not(:nth-child(2)),
+.dark .thrs-main-dashboard--v5-2 .thrs-main-dashboard__v3-metric-ribbon .thrs-main-dashboard__stat-card:not(:nth-child(2)) {
+  background: linear-gradient(145deg, #0b2237, #081a2a) !important;
+}
+
+/* Analytics — balanced 60/40 split with a larger department read. */
+.thrs-main-dashboard--v5-2 .thrs-main-dashboard__charts-grid {
+  grid-template-columns: minmax(0, 1.54fr) minmax(455px, 1fr);
+  gap: 0;
+  padding: 15px;
+  margin-block-end: 24px;
+  background:
+    radial-gradient(circle at 100% 0%, rgba(183, 144, 75, .08), transparent 24%),
+    linear-gradient(145deg, #fffdf8, #faf7f0);
+  border-radius: 30px;
+  box-shadow: var(--v52-shadow);
+}
+.thrs-main-dashboard--v5-2 .thrs-main-dashboard__charts-grid > .thrs-main-dashboard__panel {
+  min-height: 470px;
+  padding: 22px 24px;
+}
+.thrs-main-dashboard--v5-2 .thrs-main-dashboard__charts-grid > .thrs-main-dashboard__panel + .thrs-main-dashboard__panel {
+  border-inline-start-color: rgba(183, 144, 75, .15) !important;
+}
+.thrs-main-dashboard--v5-2 .thrs-main-dashboard__panel-header h2 {
+  font-size: 15.5px;
+  font-weight: 820;
+}
+.thrs-main-dashboard--v5-2 .thrs-main-dashboard__chart-wrap {
+  height: 382px;
+}
+.thrs-main-dashboard--v5-2 .thrs-main-dashboard__v3-workforce-summary {
+  margin-block: 2px 18px;
+}
+.thrs-main-dashboard--v5-2 .thrs-main-dashboard__v3-workforce-summary strong {
+  font-size: 31px;
+}
+.thrs-main-dashboard--v5-2 .thrs-main-dashboard__v3-workforce-summary small {
+  font-size: 9.5px;
+}
+.thrs-main-dashboard--v5-2 .thrs-main-dashboard__department-layout {
+  height: 340px;
+  grid-template-columns: minmax(225px, 1.08fr) minmax(210px, .92fr);
+  gap: 20px;
+  align-items: center;
+}
+.thrs-main-dashboard--v5-2 .thrs-main-dashboard__department-chart {
+  height: 312px;
+}
+.thrs-main-dashboard--v5-2 .thrs-main-dashboard__department-list {
+  max-height: 310px;
+  gap: 7px;
+  padding-inline-end: 4px;
+}
+.thrs-main-dashboard--v5-2 .thrs-main-dashboard__department-row {
+  min-height: 31px;
+  font-size: 11px;
+}
+.thrs-main-dashboard--v5-2 .thrs-main-dashboard__department-row strong {
+  font-size: 10.8px;
+}
+.thrs-main-dashboard--v5-2 .thrs-main-dashboard__department-row small {
+  font-size: 9.8px;
+}
+
+[data-theme='dark'] .thrs-main-dashboard--v5-2 .thrs-main-dashboard__charts-grid,
+.dark .thrs-main-dashboard--v5-2 .thrs-main-dashboard__charts-grid {
+  background:
+    radial-gradient(circle at 100% 0%, rgba(183, 144, 75, .07), transparent 24%),
+    linear-gradient(145deg, #0b243a, #071827) !important;
+}
+
+/* Action Center — premium navy anchor, less black in Light Mode. */
+.thrs-main-dashboard--v5-2 .thrs-main-dashboard__v3-action-center {
+  margin-block-end: 24px;
+  padding: 31px 31px 29px;
+  background:
+    radial-gradient(circle at 92% 8%, rgba(230, 201, 128, .14), transparent 25%),
+    radial-gradient(circle at 7% 100%, rgba(58, 121, 181, .12), transparent 30%),
+    linear-gradient(128deg, #0c3558 0%, #082741 53%, #061d31 100%);
+  border: 1px solid rgba(230, 201, 128, .18);
+  box-shadow: 0 34px 82px rgba(5, 30, 52, .23);
+}
+.thrs-main-dashboard--v5-2 .thrs-main-dashboard__v3-action-center::after {
+  position: absolute;
+  inset-inline: 31px;
+  inset-block-start: 0;
+  height: 1px;
+  content: '';
+  background: linear-gradient(90deg, transparent, rgba(230, 201, 128, .45), transparent);
+}
+.thrs-main-dashboard--v5-2 .thrs-main-dashboard__v3-action-center .thrs-main-dashboard__v3-section-heading {
+  margin-block-end: 25px;
+}
+.thrs-main-dashboard--v5-2 .thrs-main-dashboard__v3-action-center .thrs-main-dashboard__v3-section-heading h2 {
+  font-size: clamp(29px, 2.3vw, 36px);
+  letter-spacing: -.035em;
+}
+.thrs-main-dashboard--v5-2[dir='rtl'] .thrs-main-dashboard__v3-action-center .thrs-main-dashboard__v3-section-heading h2 {
+  letter-spacing: 0;
+}
+.thrs-main-dashboard--v5-2 .thrs-main-dashboard__v3-action-center .thrs-main-dashboard__v3-section-heading p {
+  max-width: 720px;
+  color: rgba(232, 239, 245, .69);
+  font-size: 12px;
+}
+.thrs-main-dashboard--v5-2 .thrs-main-dashboard__operations-grid {
+  grid-template-columns: minmax(300px, .95fr) minmax(430px, 1.3fr) minmax(300px, .9fr);
+  border-top-color: rgba(230, 201, 128, .14);
+}
+.thrs-main-dashboard--v5-2 .thrs-main-dashboard__operations-grid > .thrs-main-dashboard__panel,
+.thrs-main-dashboard--v5-2 .thrs-main-dashboard__operations-grid > .thrs-main-dashboard__integration-widget {
+  min-height: 250px;
+  padding: 23px 22px 17px !important;
+}
+.thrs-main-dashboard--v5-2 .thrs-main-dashboard__operations-grid > * + * {
+  border-inline-start-color: rgba(230, 201, 128, .13) !important;
+}
+.thrs-main-dashboard--v5-2 .thrs-main-dashboard__v3-action-center .thrs-main-dashboard__approval-item,
+.thrs-main-dashboard--v5-2 .thrs-main-dashboard__v3-action-center .thrs-main-dashboard__quick-action {
+  min-height: 68px;
+  background: rgba(255, 255, 255, .065) !important;
+  border: 1px solid rgba(255, 255, 255, .105) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .025);
+}
+.thrs-main-dashboard--v5-2 .thrs-main-dashboard__v3-action-center .thrs-main-dashboard__approval-item:hover,
+.thrs-main-dashboard--v5-2 .thrs-main-dashboard__v3-action-center .thrs-main-dashboard__quick-action:hover {
+  background: rgba(255, 255, 255, .095) !important;
+  border-color: rgba(230, 201, 128, .22) !important;
+}
+.thrs-main-dashboard--v5-2 .thrs-main-dashboard__v3-action-center .thrs-main-dashboard__quick-copy strong,
+.thrs-main-dashboard--v5-2 .thrs-main-dashboard__v3-action-center .thrs-main-dashboard__approval-copy strong {
+  font-size: 12px;
+}
+.thrs-main-dashboard--v5-2 .thrs-main-dashboard__v3-action-center .thrs-main-dashboard__quick-copy small,
+.thrs-main-dashboard--v5-2 .thrs-main-dashboard__v3-action-center .thrs-main-dashboard__approval-copy small,
+.thrs-main-dashboard--v5-2 .thrs-main-dashboard__v3-action-center .thrs-integration-widget__subtitle {
+  color: rgba(229, 237, 244, .62) !important;
+  font-size: 9.8px !important;
+}
+.thrs-main-dashboard--v5-2 .thrs-main-dashboard__v3-action-center .thrs-integration-widget__score-card {
+  min-width: 112px;
+  background: rgba(255, 255, 255, .05) !important;
+  border: 1px solid rgba(255, 255, 255, .08) !important;
+  border-radius: 15px !important;
+}
+
+[data-theme='dark'] .thrs-main-dashboard--v5-2 .thrs-main-dashboard__v3-action-center,
+.dark .thrs-main-dashboard--v5-2 .thrs-main-dashboard__v3-action-center {
+  background:
+    radial-gradient(circle at 92% 8%, rgba(230, 201, 128, .09), transparent 24%),
+    linear-gradient(130deg, #0a2238 0%, #071a2c 55%, #05131f 100%);
+  box-shadow: 0 32px 80px rgba(0, 0, 0, .28);
+}
+
+/* Business Performance — one executive pulse instead of three loose widgets. */
+.thrs-main-dashboard--v5-2 .thrs-main-dashboard__agency-section.thrs-main-dashboard__v3-business {
+  position: relative;
+  overflow: hidden;
+  padding: 31px 30px 27px;
+  background:
+    radial-gradient(circle at 96% 0%, rgba(183, 144, 75, .14), transparent 25%),
+    linear-gradient(135deg, #fffdf8 0%, #f8f3e9 100%);
+  border: 1px solid rgba(183, 144, 75, .18);
+  border-radius: 30px;
+  box-shadow: 0 30px 76px rgba(19, 34, 48, .10);
+}
+.thrs-main-dashboard--v5-2 .thrs-main-dashboard__agency-section.thrs-main-dashboard__v3-business::before {
+  position: absolute;
+  inset-block-start: 0;
+  inset-inline: 30px;
+  height: 2px;
+  content: '';
+  background: linear-gradient(90deg, rgba(183, 144, 75, .0), rgba(183, 144, 75, .65), rgba(183, 144, 75, .0));
+}
+.thrs-main-dashboard--v5-2 .thrs-main-dashboard__agency-section .thrs-main-dashboard__v3-section-heading {
+  max-width: 780px;
+  margin-block-end: 25px;
+}
+.thrs-main-dashboard--v5-2 .thrs-main-dashboard__agency-section .thrs-main-dashboard__v3-section-heading h2 {
+  font-size: clamp(29px, 2.25vw, 35px);
+  letter-spacing: -.035em;
+}
+.thrs-main-dashboard--v5-2[dir='rtl'] .thrs-main-dashboard__agency-section .thrs-main-dashboard__v3-section-heading h2 {
+  letter-spacing: 0;
+}
+.thrs-main-dashboard--v5-2 .thrs-main-dashboard__agency-section .thrs-main-dashboard__v3-section-heading p {
+  max-width: 700px;
+  font-size: 11.5px;
+  line-height: 1.65;
+}
+.thrs-main-dashboard--v5-2 .thrs-main-dashboard__agency-grid {
+  grid-template-columns: 1.05fr 1.35fr .95fr;
+  gap: 0;
+  margin-top: 0;
+  border-top: 1px solid rgba(183, 144, 75, .16);
+}
+.thrs-main-dashboard--v5-2 .thrs-main-dashboard__agency-grid > .thrs-main-dashboard__integration-widget {
+  min-height: 245px;
+  padding: 23px 22px 17px !important;
+}
+.thrs-main-dashboard--v5-2 .thrs-main-dashboard__agency-grid > .thrs-main-dashboard__integration-widget + .thrs-main-dashboard__integration-widget {
+  border-inline-start-color: rgba(183, 144, 75, .16) !important;
+}
+.thrs-main-dashboard--v5-2 .thrs-main-dashboard__agency-section .thrs-integration-widget__title {
+  font-size: 14.5px !important;
+  font-weight: 850 !important;
+}
+.thrs-main-dashboard--v5-2 .thrs-main-dashboard__agency-section .thrs-integration-widget__subtitle {
+  max-width: 280px;
+  font-size: 9.7px !important;
+  line-height: 1.55 !important;
+}
+.thrs-main-dashboard--v5-2 .thrs-main-dashboard__agency-section .thrs-integration-widget__badge {
+  padding: 5px 9px !important;
+  color: #8a6830 !important;
+  background: rgba(183, 144, 75, .12) !important;
+  border: 1px solid rgba(183, 144, 75, .14);
+  font-size: 8.2px !important;
+}
+.thrs-main-dashboard--v5-2 .thrs-main-dashboard__agency-section .thrs-integration-widget__client-grid,
+.thrs-main-dashboard--v5-2 .thrs-main-dashboard__agency-section .thrs-integration-widget__delivery-grid {
+  min-height: 128px;
+  align-items: stretch !important;
+}
+.thrs-main-dashboard--v5-2 .thrs-main-dashboard__agency-section .thrs-integration-widget__metric-card,
+.thrs-main-dashboard--v5-2 .thrs-main-dashboard__agency-section .thrs-integration-widget__score-card {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-height: 116px;
+  padding: 17px 15px !important;
+  background: rgba(255, 255, 255, .40) !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+}
+.thrs-main-dashboard--v5-2 .thrs-main-dashboard__agency-section .thrs-integration-widget__metric-card + .thrs-integration-widget__metric-card {
+  border-inline-start: 1px solid rgba(183, 144, 75, .15) !important;
+}
+.thrs-main-dashboard--v5-2 .thrs-main-dashboard__agency-section .thrs-integration-widget__metric-label {
+  color: #75828e !important;
+  font-size: 9.4px !important;
+  font-weight: 760 !important;
+}
+.thrs-main-dashboard--v5-2 .thrs-main-dashboard__agency-section .thrs-integration-widget__metric-value {
+  margin-top: 6px;
+  color: var(--v52-ink) !important;
+  font-size: 36px !important;
+  font-weight: 900 !important;
+  letter-spacing: -.04em;
+}
+.thrs-main-dashboard--v5-2 .thrs-main-dashboard__agency-section .thrs-integration-widget__progress {
+  min-width: 122px;
+}
+.thrs-main-dashboard--v5-2 .thrs-main-dashboard__agency-section .thrs-integration-widget__progress-svg {
+  width: 118px;
+  height: 118px;
+}
+.thrs-main-dashboard--v5-2 .thrs-main-dashboard__agency-section .thrs-integration-widget__satisfaction-grid {
+  min-height: 130px;
+  grid-template-columns: 132px 1fr !important;
+  align-items: stretch;
+}
+.thrs-main-dashboard--v5-2 .thrs-main-dashboard__agency-section .thrs-integration-widget__satisfaction-list {
+  min-height: 116px;
+  padding: 16px;
+  align-content: center;
+  border: 1px dashed rgba(183, 144, 75, .20);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, .28);
+}
+
+[data-theme='dark'] .thrs-main-dashboard--v5-2 .thrs-main-dashboard__agency-section.thrs-main-dashboard__v3-business,
+.dark .thrs-main-dashboard--v5-2 .thrs-main-dashboard__agency-section.thrs-main-dashboard__v3-business {
+  background:
+    radial-gradient(circle at 96% 0%, rgba(183, 144, 75, .08), transparent 25%),
+    linear-gradient(145deg, #0c1d2e, #081522) !important;
+  border-color: rgba(183, 144, 75, .13);
+}
+[data-theme='dark'] .thrs-main-dashboard--v5-2 .thrs-main-dashboard__agency-section .thrs-integration-widget__metric-card,
+.dark .thrs-main-dashboard--v5-2 .thrs-main-dashboard__agency-section .thrs-integration-widget__metric-card,
+[data-theme='dark'] .thrs-main-dashboard--v5-2 .thrs-main-dashboard__agency-section .thrs-integration-widget__score-card,
+.dark .thrs-main-dashboard--v5-2 .thrs-main-dashboard__agency-section .thrs-integration-widget__score-card {
+  background: rgba(255, 255, 255, .025) !important;
+}
+[data-theme='dark'] .thrs-main-dashboard--v5-2 .thrs-main-dashboard__agency-section .thrs-integration-widget__satisfaction-list,
+.dark .thrs-main-dashboard--v5-2 .thrs-main-dashboard__agency-section .thrs-integration-widget__satisfaction-list {
+  color: #91a2b3 !important;
+  background: rgba(255, 255, 255, .018);
+  border-color: rgba(183, 144, 75, .13);
+}
+[data-theme='dark'] .thrs-main-dashboard--v5-2 .thrs-main-dashboard__agency-section .thrs-integration-widget__metric-value,
+.dark .thrs-main-dashboard--v5-2 .thrs-main-dashboard__agency-section .thrs-integration-widget__metric-value {
+  color: #f5f8fa !important;
+}
+
+/* Responsive safety */
+@media (max-width: 1380px) {
+  .thrs-main-dashboard--v5-2 .thrs-main-dashboard__v3-metric-ribbon {
+    grid-template-columns: minmax(270px, 2fr) repeat(4, minmax(120px, 1fr));
+  }
+  .thrs-main-dashboard--v5-2 .thrs-main-dashboard__charts-grid {
+    grid-template-columns: minmax(0, 1.42fr) minmax(390px, 1fr);
+  }
+  .thrs-main-dashboard--v5-2 .thrs-main-dashboard__operations-grid {
+    grid-template-columns: 1fr 1.15fr .9fr;
+  }
+}
+
+@media (max-width: 1080px) {
+  .thrs-main-dashboard--v5-2 .thrs-main-dashboard__v3-metric-ribbon {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .thrs-main-dashboard--v5-2 .thrs-main-dashboard__v3-metric-ribbon .thrs-main-dashboard__stat-card:nth-child(n),
+  .thrs-main-dashboard--v5-2 .thrs-main-dashboard__v3-metric-ribbon .thrs-main-dashboard__stat-card:nth-child(2) {
+    order: initial;
+    grid-column: auto;
+  }
+  .thrs-main-dashboard--v5-2 .thrs-main-dashboard__v3-metric-ribbon .thrs-main-dashboard__stat-card:nth-child(2) {
+    grid-column: span 2;
+  }
+  .thrs-main-dashboard--v5-2 .thrs-main-dashboard__charts-grid,
+  .thrs-main-dashboard--v5-2 .thrs-main-dashboard__operations-grid,
+  .thrs-main-dashboard--v5-2 .thrs-main-dashboard__agency-grid {
+    grid-template-columns: 1fr;
+  }
+  .thrs-main-dashboard--v5-2 .thrs-main-dashboard__charts-grid > .thrs-main-dashboard__panel + .thrs-main-dashboard__panel,
+  .thrs-main-dashboard--v5-2 .thrs-main-dashboard__operations-grid > * + *,
+  .thrs-main-dashboard--v5-2 .thrs-main-dashboard__agency-grid > .thrs-main-dashboard__integration-widget + .thrs-main-dashboard__integration-widget {
+    border-inline-start: 0 !important;
+    border-top: 1px solid var(--v52-line) !important;
+  }
+}
+
+@media (max-width: 680px) {
+  .thrs-main-dashboard--v5-2 .thrs-main-dashboard__v3-metric-ribbon {
+    grid-template-columns: 1fr;
+  }
+  .thrs-main-dashboard--v5-2 .thrs-main-dashboard__v3-metric-ribbon .thrs-main-dashboard__stat-card:nth-child(2) {
+    grid-column: auto;
+  }
+  .thrs-main-dashboard--v5-2 .thrs-main-dashboard__department-layout {
+    height: auto;
+    grid-template-columns: 1fr;
+  }
+  .thrs-main-dashboard--v5-2 .thrs-main-dashboard__department-chart {
+    height: 250px;
+  }
+  .thrs-main-dashboard--v5-2 .thrs-main-dashboard__v3-action-center,
+  .thrs-main-dashboard--v5-2 .thrs-main-dashboard__agency-section.thrs-main-dashboard__v3-business {
+    padding: 23px 18px;
+  }
+}
