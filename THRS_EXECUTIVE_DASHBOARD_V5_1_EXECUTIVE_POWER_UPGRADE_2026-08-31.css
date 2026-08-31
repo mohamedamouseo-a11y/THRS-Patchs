@@ -1,0 +1,454 @@
+/* THRS Executive Dashboard V5.1 — Executive Power Upgrade
+   Stronger visual authority for Action Center, Analytics and Business Pulse.
+   Visual-only. Scoped to .thrs-main-dashboard--v5-1. */
+
+.thrs-main-dashboard--v5-1 {
+  --v51-ink: #071a2c;
+  --v51-muted: #68788a;
+  --v51-gold: #b7914d;
+  --v51-gold-hi: #e7ca87;
+  --v51-red: #d2604f;
+  --v51-line: rgba(7, 26, 44, .11);
+  --v51-ivory: #fbf8f2;
+  --v51-pearl: #f1f3f4;
+  --v51-navy: #061a2d;
+  --v51-navy-2: #0a2946;
+  --v51-deep: #03111e;
+  --v51-shadow: 0 34px 90px rgba(10, 30, 50, .12), 0 4px 18px rgba(10, 30, 50, .04);
+  max-width: 1710px;
+  background:
+    radial-gradient(circle at 92% 0%, rgba(183,145,77,.18), transparent 22%),
+    radial-gradient(circle at 6% 30%, rgba(26,67,105,.065), transparent 27%),
+    linear-gradient(180deg,#fbfaf7 0%,#edf1f4 48%,#e3e9ee 100%);
+}
+
+[data-theme='dark'] .thrs-main-dashboard--v5-1,
+.dark .thrs-main-dashboard--v5-1 {
+  --v51-ink: #f5f7f9;
+  --v51-muted: #98a8b8;
+  --v51-line: rgba(229,236,243,.10);
+  --v51-shadow: 0 38px 100px rgba(0,0,0,.42);
+  background:
+    radial-gradient(circle at 90% 0%, rgba(183,145,77,.11), transparent 22%),
+    radial-gradient(circle at 8% 24%, rgba(29,78,124,.15), transparent 26%),
+    linear-gradient(180deg,#061321 0%,#020a12 52%,#01050a 100%);
+}
+
+/* Stronger first impression */
+.thrs-main-dashboard--v5-1 .thrs-main-dashboard__page-header {
+  margin-block-end: 10px;
+  padding-inline: 2px;
+}
+.thrs-main-dashboard--v5-1 .thrs-main-dashboard__page-heading h1 {
+  font-size: clamp(38px,3.45vw,58px);
+  font-weight: 920;
+  letter-spacing: -.058em;
+}
+.thrs-main-dashboard--v5-1[dir='rtl'] .thrs-main-dashboard__page-heading h1 { letter-spacing: 0; }
+.thrs-main-dashboard--v5-1 .thrs-main-dashboard__page-heading > p:last-child {
+  margin-top: 8px;
+  font-size: 12.5px;
+}
+.thrs-main-dashboard--v5-1 .thrs-main-dashboard__customize {
+  min-height: 42px;
+  padding-inline: 17px;
+  font-weight: 760;
+  background: rgba(255,255,255,.36);
+  backdrop-filter: blur(10px);
+}
+[data-theme='dark'] .thrs-main-dashboard--v5-1 .thrs-main-dashboard__customize,
+.dark .thrs-main-dashboard--v5-1 .thrs-main-dashboard__customize {
+  background: rgba(255,255,255,.025);
+}
+
+/* Command surface gains more weight */
+.thrs-main-dashboard--v5-1 .thrs-main-dashboard__v3-command {
+  margin-block: 8px 18px;
+  border-radius: 30px;
+  box-shadow: 0 38px 95px rgba(2,19,34,.29);
+}
+.thrs-main-dashboard--v5-1 .thrs-main-dashboard__v3-command-main {
+  min-height: 300px;
+  padding: 28px 32px;
+  background:
+    radial-gradient(circle at 78% 46%, rgba(183,145,77,.23), transparent 23%),
+    radial-gradient(circle at 4% 0%, rgba(78,139,201,.11), transparent 30%),
+    linear-gradient(118deg,#0d3b65 0%,#082640 48%,#041421 100%);
+}
+.thrs-main-dashboard--v5-1 .thrs-main-dashboard__v3-primary-kpi strong {
+  font-size: clamp(52px,4.8vw,72px);
+}
+.thrs-main-dashboard--v5-1 .thrs-main-dashboard__v3-primary-kpi small {
+  font-size: 10.5px;
+  letter-spacing: .02em;
+}
+.thrs-main-dashboard--v5-1 .thrs-main-dashboard__v3-primary-kpi span {
+  font-size: 11px;
+}
+.thrs-main-dashboard--v5-1 .thrs-main-dashboard__hero-art {
+  max-width: 370px;
+  filter: drop-shadow(0 24px 36px rgba(0,0,0,.18));
+}
+.thrs-main-dashboard--v5-1 .thrs-main-dashboard__v3-attention {
+  min-height: 300px;
+  padding: 26px 24px;
+  background:
+    radial-gradient(circle at 100% 0%, rgba(210,96,79,.15), transparent 34%),
+    linear-gradient(180deg,#071d31,#041522);
+}
+.thrs-main-dashboard--v5-1 .thrs-main-dashboard__v3-attention-head strong { font-size: 46px; }
+.thrs-main-dashboard--v5-1 .thrs-main-dashboard__v3-attention > a {
+  min-height: 43px;
+  font-size: 10.5px;
+}
+
+/* KPI hierarchy: critical metric reads first */
+.thrs-main-dashboard--v5-1 .thrs-main-dashboard__v3-metric-ribbon {
+  gap: 10px;
+  margin-block-end: 20px;
+}
+.thrs-main-dashboard--v5-1 .thrs-main-dashboard__v3-metric-ribbon .thrs-main-dashboard__stat-card {
+  min-height: 132px;
+  padding: 18px 19px 16px;
+  border-radius: 20px !important;
+  box-shadow: 0 14px 34px rgba(10,29,48,.055) !important;
+}
+.thrs-main-dashboard--v5-1 .thrs-main-dashboard__v3-metric-ribbon .thrs-main-dashboard__stat-card:nth-child(2) {
+  min-height: 150px;
+  padding: 20px 22px 18px;
+  background:
+    radial-gradient(circle at 100% 0%, rgba(210,96,79,.13), transparent 35%),
+    linear-gradient(135deg,#fffaf6,#fffdfb) !important;
+  border-color: rgba(210,96,79,.28) !important;
+  box-shadow: 0 18px 44px rgba(154,62,45,.10) !important;
+}
+[data-theme='dark'] .thrs-main-dashboard--v5-1 .thrs-main-dashboard__v3-metric-ribbon .thrs-main-dashboard__stat-card:nth-child(2),
+.dark .thrs-main-dashboard--v5-1 .thrs-main-dashboard__v3-metric-ribbon .thrs-main-dashboard__stat-card:nth-child(2) {
+  background:
+    radial-gradient(circle at 100% 0%, rgba(210,96,79,.12), transparent 36%),
+    linear-gradient(145deg,#10263a,#091a29) !important;
+}
+.thrs-main-dashboard--v5-1 .thrs-main-dashboard__stat-title { font-size: 11px; }
+.thrs-main-dashboard--v5-1 .thrs-main-dashboard__stat-value strong { font-size: 32px; }
+.thrs-main-dashboard--v5-1 .thrs-main-dashboard__v3-metric-ribbon .thrs-main-dashboard__stat-card:nth-child(2) .thrs-main-dashboard__stat-value strong {
+  font-size: 48px;
+}
+
+/* Analytics becomes a real executive canvas */
+.thrs-main-dashboard--v5-1 .thrs-main-dashboard__charts-grid {
+  grid-template-columns: minmax(0,1.48fr) minmax(410px,1fr);
+  padding: 14px;
+  margin-block-end: 22px;
+  border-radius: 30px;
+  background:
+    radial-gradient(circle at 100% 0%, rgba(183,145,77,.08), transparent 20%),
+    var(--v51-ivory);
+  box-shadow: var(--v51-shadow);
+}
+[data-theme='dark'] .thrs-main-dashboard--v5-1 .thrs-main-dashboard__charts-grid,
+.dark .thrs-main-dashboard--v5-1 .thrs-main-dashboard__charts-grid {
+  background:
+    radial-gradient(circle at 100% 0%, rgba(183,145,77,.07), transparent 20%),
+    linear-gradient(145deg,#0a2035,#061522) !important;
+}
+.thrs-main-dashboard--v5-1 .thrs-main-dashboard__charts-grid > .thrs-main-dashboard__panel {
+  min-height: 455px;
+  padding: 22px 24px;
+}
+.thrs-main-dashboard--v5-1 .thrs-main-dashboard__panel-header h2 {
+  font-size: 15px;
+  letter-spacing: -.01em;
+}
+.thrs-main-dashboard--v5-1 .thrs-main-dashboard__chart-wrap { height: 370px; }
+.thrs-main-dashboard--v5-1 .thrs-main-dashboard__v3-workforce-summary strong { font-size: 30px; }
+.thrs-main-dashboard--v5-1 .thrs-main-dashboard__v3-workforce-summary small { font-size: 9px; }
+.thrs-main-dashboard--v5-1 .thrs-main-dashboard__department-layout {
+  height: 320px;
+  grid-template-columns: minmax(205px,1.02fr) minmax(205px,.98fr);
+  gap: 18px;
+}
+.thrs-main-dashboard--v5-1 .thrs-main-dashboard__department-chart { height: 285px; }
+.thrs-main-dashboard--v5-1 .thrs-main-dashboard__department-list {
+  max-height: 285px;
+  gap: 6px;
+}
+.thrs-main-dashboard--v5-1 .thrs-main-dashboard__department-row {
+  min-height: 30px;
+  font-size: 10.5px;
+}
+.thrs-main-dashboard--v5-1 .thrs-main-dashboard__department-row strong { font-size: 10.5px; }
+.thrs-main-dashboard--v5-1 .thrs-main-dashboard__department-row small { font-size: 9.5px; }
+
+/* ACTION CENTER — deliberate dark executive console in both themes */
+.thrs-main-dashboard--v5-1 .thrs-main-dashboard__v3-action-center {
+  position: relative;
+  overflow: hidden;
+  margin-block: 0 22px;
+  padding: 30px 30px 28px;
+  color: #f6f8fa;
+  background:
+    radial-gradient(circle at 92% 8%, rgba(183,145,77,.16), transparent 24%),
+    radial-gradient(circle at 8% 100%, rgba(48,105,158,.10), transparent 28%),
+    linear-gradient(125deg,#081f34 0%,#051725 54%,#03101b 100%);
+  border: 1px solid rgba(231,202,135,.15);
+  border-radius: 30px;
+  box-shadow: 0 36px 90px rgba(3,19,34,.25);
+}
+.thrs-main-dashboard--v5-1 .thrs-main-dashboard__v3-action-center:before {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  content: '';
+  background:
+    linear-gradient(112deg,rgba(255,255,255,.035),transparent 30%),
+    repeating-linear-gradient(90deg,transparent 0 118px,rgba(255,255,255,.012) 119px);
+}
+.thrs-main-dashboard--v5-1 .thrs-main-dashboard__v3-action-center > * { position: relative; z-index: 1; }
+.thrs-main-dashboard--v5-1 .thrs-main-dashboard__v3-action-center .thrs-main-dashboard__v3-section-heading {
+  max-width: 760px;
+  margin-block-end: 24px;
+}
+.thrs-main-dashboard--v5-1 .thrs-main-dashboard__v3-action-center .thrs-main-dashboard__v3-section-heading > span {
+  color: var(--v51-gold-hi);
+  font-size: 9.5px;
+  letter-spacing: .13em;
+}
+.thrs-main-dashboard--v5-1 .thrs-main-dashboard__v3-action-center .thrs-main-dashboard__v3-section-heading h2 {
+  color: #fff;
+  font-size: clamp(27px,2.2vw,34px);
+  margin-top: 2px;
+}
+.thrs-main-dashboard--v5-1 .thrs-main-dashboard__v3-action-center .thrs-main-dashboard__v3-section-heading p {
+  color: rgba(226,235,243,.62);
+  font-size: 11.5px;
+  line-height: 1.65;
+}
+.thrs-main-dashboard--v5-1 .thrs-main-dashboard__operations-grid {
+  grid-template-columns: minmax(300px,.95fr) minmax(430px,1.28fr) minmax(290px,.9fr);
+  gap: 0;
+  border-top: 1px solid rgba(231,202,135,.12);
+}
+.thrs-main-dashboard--v5-1 .thrs-main-dashboard__operations-grid > .thrs-main-dashboard__panel,
+.thrs-main-dashboard--v5-1 .thrs-main-dashboard__operations-grid > .thrs-main-dashboard__integration-widget {
+  min-height: 246px;
+  padding: 22px 22px 16px !important;
+}
+.thrs-main-dashboard--v5-1 .thrs-main-dashboard__operations-grid > * + * {
+  border-inline-start-color: rgba(231,202,135,.12) !important;
+}
+.thrs-main-dashboard--v5-1 .thrs-main-dashboard__v3-action-center .thrs-main-dashboard__panel-header h2,
+.thrs-main-dashboard--v5-1 .thrs-main-dashboard__v3-action-center .thrs-integration-widget__title {
+  color: #fff !important;
+  font-size: 14px !important;
+}
+.thrs-main-dashboard--v5-1 .thrs-main-dashboard__v3-action-center .thrs-main-dashboard__panel-action {
+  color: #d9c28c;
+  border-color: rgba(231,202,135,.14);
+  background: rgba(231,202,135,.05);
+}
+.thrs-main-dashboard--v5-1 .thrs-main-dashboard__v3-action-center .thrs-main-dashboard__approval-item,
+.thrs-main-dashboard--v5-1 .thrs-main-dashboard__v3-action-center .thrs-main-dashboard__quick-action {
+  min-height: 66px;
+  background: rgba(255,255,255,.045);
+  border: 1px solid rgba(255,255,255,.075);
+  border-radius: 14px;
+}
+.thrs-main-dashboard--v5-1 .thrs-main-dashboard__v3-action-center .thrs-main-dashboard__approval-item:hover,
+.thrs-main-dashboard--v5-1 .thrs-main-dashboard__v3-action-center .thrs-main-dashboard__quick-action:hover {
+  background: rgba(255,255,255,.075);
+  border-color: rgba(231,202,135,.18);
+  transform: translateY(-1px);
+}
+.thrs-main-dashboard--v5-1 .thrs-main-dashboard__v3-action-center .thrs-main-dashboard__quick-copy strong,
+.thrs-main-dashboard--v5-1 .thrs-main-dashboard__v3-action-center .thrs-main-dashboard__approval-copy strong {
+  color: #fff;
+  font-size: 11.5px;
+}
+.thrs-main-dashboard--v5-1 .thrs-main-dashboard__v3-action-center .thrs-main-dashboard__quick-copy small,
+.thrs-main-dashboard--v5-1 .thrs-main-dashboard__v3-action-center .thrs-main-dashboard__approval-copy small,
+.thrs-main-dashboard--v5-1 .thrs-main-dashboard__v3-action-center .thrs-integration-widget__subtitle {
+  color: rgba(226,235,243,.54) !important;
+  font-size: 9.5px !important;
+}
+.thrs-main-dashboard--v5-1 .thrs-main-dashboard__v3-action-center .thrs-integration-widget__score-card {
+  background: rgba(255,255,255,.045) !important;
+  border: 1px solid rgba(255,255,255,.07) !important;
+  border-radius: 14px !important;
+}
+.thrs-main-dashboard--v5-1 .thrs-main-dashboard__v3-action-center .thrs-integration-widget__score-card > div:nth-child(2) {
+  color: #fff !important;
+}
+.thrs-main-dashboard--v5-1 .thrs-main-dashboard__v3-action-center .thrs-integration-widget__satisfaction-list {
+  min-height: 120px;
+  display: grid !important;
+  place-items: center;
+  padding: 18px;
+  color: rgba(226,235,243,.58) !important;
+  background: rgba(255,255,255,.025);
+  border: 1px dashed rgba(231,202,135,.13);
+  border-radius: 14px;
+  text-align: center;
+}
+
+/* BUSINESS PULSE — stronger lower anchor, fewer widget vibes */
+.thrs-main-dashboard--v5-1 .thrs-main-dashboard__agency-section.thrs-main-dashboard__v3-business {
+  position: relative;
+  overflow: hidden;
+  padding: 30px 30px 26px;
+  background:
+    radial-gradient(circle at 100% 0%, rgba(183,145,77,.14), transparent 22%),
+    linear-gradient(145deg,#fffdf8,#f4f0e8);
+  border: 1px solid rgba(183,145,77,.17);
+  border-radius: 30px;
+  box-shadow: var(--v51-shadow);
+}
+[data-theme='dark'] .thrs-main-dashboard--v5-1 .thrs-main-dashboard__agency-section.thrs-main-dashboard__v3-business,
+.dark .thrs-main-dashboard--v5-1 .thrs-main-dashboard__agency-section.thrs-main-dashboard__v3-business {
+  background:
+    radial-gradient(circle at 100% 0%, rgba(183,145,77,.10), transparent 24%),
+    linear-gradient(145deg,#0c2238,#071521) !important;
+  border-color: rgba(231,202,135,.12);
+}
+.thrs-main-dashboard--v5-1 .thrs-main-dashboard__v3-section-heading--business {
+  max-width: 780px;
+  margin-block-end: 20px;
+}
+.thrs-main-dashboard--v5-1 .thrs-main-dashboard__v3-section-heading--business > span {
+  color: var(--v51-gold);
+  font-size: 9.5px;
+  letter-spacing: .13em;
+}
+.thrs-main-dashboard--v5-1 .thrs-main-dashboard__v3-section-heading--business h2 {
+  color: var(--v51-ink);
+  font-size: clamp(27px,2.2vw,34px);
+}
+.thrs-main-dashboard--v5-1 .thrs-main-dashboard__v3-section-heading--business p {
+  color: var(--v51-muted);
+  font-size: 11.5px;
+  line-height: 1.65;
+}
+.thrs-main-dashboard--v5-1 .thrs-main-dashboard__agency-grid {
+  grid-template-columns: .92fr 1.32fr 1fr;
+  margin-top: 0;
+  border-top: 1px solid rgba(183,145,77,.14);
+}
+.thrs-main-dashboard--v5-1 .thrs-main-dashboard__agency-grid > .thrs-main-dashboard__integration-widget {
+  min-height: 255px;
+  padding: 22px 22px 18px !important;
+}
+.thrs-main-dashboard--v5-1 .thrs-main-dashboard__agency-grid > .thrs-main-dashboard__integration-widget + .thrs-main-dashboard__integration-widget {
+  border-inline-start-color: rgba(183,145,77,.13) !important;
+}
+.thrs-main-dashboard--v5-1 .thrs-main-dashboard__agency-grid .thrs-integration-widget__title {
+  color: var(--v51-ink) !important;
+  font-size: 14.5px !important;
+  font-weight: 850 !important;
+}
+.thrs-main-dashboard--v5-1 .thrs-main-dashboard__agency-grid .thrs-integration-widget__subtitle {
+  color: var(--v51-muted) !important;
+  font-size: 9.5px !important;
+  line-height: 1.45 !important;
+}
+.thrs-main-dashboard--v5-1 .thrs-main-dashboard__agency-grid .thrs-integration-widget__badge {
+  padding: 4px 8px !important;
+  color: #8b6b31 !important;
+  background: rgba(183,145,77,.10) !important;
+  border: 1px solid rgba(183,145,77,.12);
+  font-size: 7.5px !important;
+}
+.thrs-main-dashboard--v5-1 .thrs-integration-widget__client-grid,
+.thrs-main-dashboard--v5-1 .thrs-integration-widget__delivery-grid {
+  align-items: stretch !important;
+}
+.thrs-main-dashboard--v5-1 .thrs-main-dashboard__agency-grid .thrs-integration-widget__metric-card,
+.thrs-main-dashboard--v5-1 .thrs-main-dashboard__agency-grid .thrs-integration-widget__score-card {
+  min-height: 118px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 18px 16px !important;
+  background: rgba(255,255,255,.34) !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+}
+[data-theme='dark'] .thrs-main-dashboard--v5-1 .thrs-main-dashboard__agency-grid .thrs-integration-widget__metric-card,
+.dark .thrs-main-dashboard--v5-1 .thrs-main-dashboard__agency-grid .thrs-integration-widget__metric-card,
+[data-theme='dark'] .thrs-main-dashboard--v5-1 .thrs-main-dashboard__agency-grid .thrs-integration-widget__score-card,
+.dark .thrs-main-dashboard--v5-1 .thrs-main-dashboard__agency-grid .thrs-integration-widget__score-card {
+  background: rgba(255,255,255,.025) !important;
+}
+.thrs-main-dashboard--v5-1 .thrs-main-dashboard__agency-grid .thrs-integration-widget__metric-label {
+  color: var(--v51-muted) !important;
+  font-size: 9px !important;
+  font-weight: 760;
+}
+.thrs-main-dashboard--v5-1 .thrs-main-dashboard__agency-grid .thrs-integration-widget__metric-value {
+  margin-top: 8px;
+  color: var(--v51-ink) !important;
+  font-size: 38px !important;
+  line-height: 1;
+}
+.thrs-main-dashboard--v5-1 .thrs-main-dashboard__agency-grid .thrs-integration-widget__progress-svg {
+  width: 96px;
+  height: 96px;
+}
+.thrs-main-dashboard--v5-1 .thrs-main-dashboard__agency-grid .thrs-integration-widget__progress-label {
+  font-size: 9px !important;
+  font-weight: 720;
+}
+.thrs-main-dashboard--v5-1 .thrs-main-dashboard__agency-grid .thrs-integration-widget__satisfaction-list {
+  min-height: 128px;
+  display: grid !important;
+  align-content: center;
+  padding: 16px;
+  color: var(--v51-muted) !important;
+  background: rgba(255,255,255,.24);
+  border: 1px dashed rgba(183,145,77,.16);
+  border-radius: 14px;
+  text-align: center;
+}
+[data-theme='dark'] .thrs-main-dashboard--v5-1 .thrs-main-dashboard__agency-grid .thrs-integration-widget__satisfaction-list,
+.dark .thrs-main-dashboard--v5-1 .thrs-main-dashboard__agency-grid .thrs-integration-widget__satisfaction-list {
+  background: rgba(255,255,255,.02);
+}
+
+/* Dark mode layer differentiation */
+[data-theme='dark'] .thrs-main-dashboard--v5-1 .thrs-main-dashboard__v3-metric-ribbon .thrs-main-dashboard__stat-card,
+.dark .thrs-main-dashboard--v5-1 .thrs-main-dashboard__v3-metric-ribbon .thrs-main-dashboard__stat-card {
+  background: linear-gradient(145deg,#0c2237,#081827) !important;
+}
+[data-theme='dark'] .thrs-main-dashboard--v5-1 .thrs-main-dashboard__charts-grid,
+.dark .thrs-main-dashboard--v5-1 .thrs-main-dashboard__charts-grid {
+  border-color: rgba(231,202,135,.08);
+}
+[data-theme='dark'] .thrs-main-dashboard--v5-1 .thrs-main-dashboard__agency-grid .thrs-integration-widget__title,
+.dark .thrs-main-dashboard--v5-1 .thrs-main-dashboard__agency-grid .thrs-integration-widget__title,
+[data-theme='dark'] .thrs-main-dashboard--v5-1 .thrs-main-dashboard__agency-grid .thrs-integration-widget__metric-value,
+.dark .thrs-main-dashboard--v5-1 .thrs-main-dashboard__agency-grid .thrs-integration-widget__metric-value,
+[data-theme='dark'] .thrs-main-dashboard--v5-1 .thrs-main-dashboard__v3-section-heading--business h2,
+.dark .thrs-main-dashboard--v5-1 .thrs-main-dashboard__v3-section-heading--business h2 {
+  color: #f5f7f9 !important;
+}
+
+/* Responsive */
+@media (max-width: 1320px) {
+  .thrs-main-dashboard--v5-1 .thrs-main-dashboard__charts-grid { grid-template-columns: minmax(0,1.35fr) minmax(360px,.95fr); }
+  .thrs-main-dashboard--v5-1 .thrs-main-dashboard__operations-grid { grid-template-columns: .95fr 1.18fr .9fr; }
+}
+@media (max-width: 1080px) {
+  .thrs-main-dashboard--v5-1 .thrs-main-dashboard__operations-grid,
+  .thrs-main-dashboard--v5-1 .thrs-main-dashboard__agency-grid { grid-template-columns: 1fr; }
+  .thrs-main-dashboard--v5-1 .thrs-main-dashboard__operations-grid > * + *,
+  .thrs-main-dashboard--v5-1 .thrs-main-dashboard__agency-grid > .thrs-main-dashboard__integration-widget + .thrs-main-dashboard__integration-widget {
+    border-inline-start: 0 !important;
+    border-top: 1px solid rgba(231,202,135,.12) !important;
+  }
+  .thrs-main-dashboard--v5-1 .thrs-main-dashboard__agency-grid > .thrs-main-dashboard__integration-widget { min-height: auto; }
+}
+@media (max-width: 760px) {
+  .thrs-main-dashboard--v5-1 .thrs-main-dashboard__page-heading h1 { font-size: 34px; }
+  .thrs-main-dashboard--v5-1 .thrs-main-dashboard__v3-action-center,
+  .thrs-main-dashboard--v5-1 .thrs-main-dashboard__agency-section.thrs-main-dashboard__v3-business { padding: 22px 18px; }
+  .thrs-main-dashboard--v5-1 .thrs-main-dashboard__department-layout { height: auto; grid-template-columns: 1fr; }
+  .thrs-main-dashboard--v5-1 .thrs-main-dashboard__department-chart { height: 240px; }
+}
