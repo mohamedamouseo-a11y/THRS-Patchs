@@ -1,0 +1,22 @@
+diff --git a/frontend/src/pages/dashboards/ExecutiveDashboard.jsx b/frontend/src/pages/dashboards/ExecutiveDashboard.jsx
+--- a/frontend/src/pages/dashboards/ExecutiveDashboard.jsx
++++ b/frontend/src/pages/dashboards/ExecutiveDashboard.jsx
+@@ -39,8 +39,9 @@
+ } from 'lucide-react';
+ import '../../styles/thrs-main-dashboard.css';
+ import '../../styles/thrs-main-dashboard-v3.css';
+ import '../../styles/thrs-main-dashboard-v4.css';
+ import '../../styles/thrs-main-dashboard-v5.css';
+ import '../../styles/thrs-main-dashboard-v5-1.css';
++import '../../styles/thrs-main-dashboard-v5-2.css';
+ 
+ ChartJS.register(
+@@ -380,7 +381,7 @@
+   };
+ 
+   return (
+-    <main className="thrs-main-dashboard thrs-main-dashboard--v3 thrs-main-dashboard--v4 thrs-main-dashboard--v5 thrs-main-dashboard--v5-1 fade-in" dir={direction}>
++    <main className="thrs-main-dashboard thrs-main-dashboard--v3 thrs-main-dashboard--v4 thrs-main-dashboard--v5 thrs-main-dashboard--v5-1 thrs-main-dashboard--v5-2 fade-in" dir={direction}>
+       <header className="thrs-main-dashboard__page-header">
+         <div className="thrs-main-dashboard__page-heading">
+           <p className="thrs-main-dashboard__date"><Sparkles size={15} aria-hidden="true" />{formattedDate}</p>
