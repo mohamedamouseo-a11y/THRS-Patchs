@@ -1,25 +1,29 @@
 diff --git a/frontend/src/pages/dashboards/ExecutiveDashboard.jsx b/frontend/src/pages/dashboards/ExecutiveDashboard.jsx
 --- a/frontend/src/pages/dashboards/ExecutiveDashboard.jsx
 +++ b/frontend/src/pages/dashboards/ExecutiveDashboard.jsx
-@@ -43,5 +43,6 @@
+@@ -43,6 +43,7 @@
  import '../../styles/thrs-main-dashboard-v5.css';
  import '../../styles/thrs-main-dashboard-v5-1.css';
  import '../../styles/thrs-main-dashboard-v5-2.css';
 +import '../../styles/thrs-main-dashboard-v6.css';
  
  ChartJS.register(
-@@ -380,3 +380,3 @@
+   ArcElement,
+@@ -381,5 +382,5 @@
    return (
 -    <main className="thrs-main-dashboard thrs-main-dashboard--v3 thrs-main-dashboard--v4 thrs-main-dashboard--v5 thrs-main-dashboard--v5-1 thrs-main-dashboard--v5-2 fade-in" dir={direction}>
 -      <header className="thrs-main-dashboard__page-header">
 +    <main className="thrs-main-dashboard thrs-main-dashboard--v3 thrs-main-dashboard--v4 thrs-main-dashboard--v5 thrs-main-dashboard--v5-1 thrs-main-dashboard--v5-2 thrs-main-dashboard--v6 fade-in" dir={direction}>
 +      <header className="thrs-main-dashboard__page-header thrs-main-dashboard__v6-header">
-@@ -391,2 +391,2 @@
+         <div className="thrs-main-dashboard__page-heading">
+           <p className="thrs-main-dashboard__date"><Sparkles size={15} aria-hidden="true" />{formattedDate}</p>
+@@ -392,3 +393,3 @@
 -      <section className="thrs-main-dashboard__v3-command" aria-label={copy.totalEmployees}>
 -        <div className="thrs-main-dashboard__v3-command-main">
 +      <section className="thrs-main-dashboard__v3-command thrs-main-dashboard__v6-command-deck" aria-label={copy.totalEmployees}>
 +        <div className="thrs-main-dashboard__v3-command-main thrs-main-dashboard__v6-command-main">
-@@ -463,9 +463,40 @@
+           <div className="thrs-main-dashboard__v3-command-topline">
+@@ -464,10 +465,41 @@
 -      <section className="thrs-main-dashboard__v3-metric-ribbon" aria-label={copy.totalEmployees}>
 -        <StatCard icon={UserCheck} tone="present" title={copy.presentToday} value={presentToday} subtitle={`${attendanceRate}% ${copy.ofTeam}`} progress={attendanceRate} />
 -        <StatCard icon={UserX} tone="absent" title={copy.absentToday} value={absentToday} subtitle={`${absentRate.toFixed(1)}% ${copy.ofTeam}`} progress={absentRate} />
@@ -67,18 +71,18 @@ diff --git a/frontend/src/pages/dashboards/ExecutiveDashboard.jsx b/frontend/src
 +          </div>
 +        </div>
 +        <div className="thrs-main-dashboard__v6-intelligence-canvas">
-@@ -553,4 +553,5 @@
+         <DashboardPanel title={copy.attendanceTrend} className="thrs-main-dashboard__v3-attendance-panel">
+@@ -554,11 +586,26 @@
          </DashboardPanel>
 +        </div>
        </section>
  
 -      <section className="thrs-main-dashboard__v3-action-center">
-+      <section className="thrs-main-dashboard__v3-action-center thrs-main-dashboard__v6-decision-console">
-@@ -554,6 +554,20 @@
 -        <div className="thrs-main-dashboard__v3-section-heading">
 -          <span>{language === 'ar' ? 'مركز الإجراءات' : 'Action center'}</span>
 -          <h2>{language === 'ar' ? 'ما يحتاج قرارك الآن' : 'What needs your decision now'}</h2>
 -          <p>{language === 'ar' ? 'الموافقات والإجراءات السريعة وإشارات رضا العملاء في مساحة تنفيذية واحدة.' : 'Approvals, quick commands, and client feedback signals in one executive workspace.'}</p>
++      <section className="thrs-main-dashboard__v3-action-center thrs-main-dashboard__v6-decision-console">
 +        <div className="thrs-main-dashboard__v3-section-heading thrs-main-dashboard__v6-decision-heading">
 +          <span>{language === 'ar' ? 'قائمة القرار' : 'Decision queue'}</span>
 +          <h2>{language === 'ar' ? 'ما يستحق تدخلك الآن' : 'What deserves your attention now'}</h2>
@@ -100,7 +104,8 @@ diff --git a/frontend/src/pages/dashboards/ExecutiveDashboard.jsx b/frontend/src
 +          </div>
 +        </div>
 +        <div className="thrs-main-dashboard__operations-grid thrs-main-dashboard__v6-decision-grid">
-@@ -610,7 +610,16 @@
+           <DashboardPanel
+@@ -611,8 +658,17 @@
 -      <section className="thrs-main-dashboard__agency-section thrs-main-dashboard__v3-business">
 -        <div className="thrs-main-dashboard__v3-section-heading thrs-main-dashboard__v3-section-heading--business">
 -          <span>{language === 'ar' ? 'أداء الأعمال' : 'Business performance'}</span>
@@ -123,3 +128,4 @@ diff --git a/frontend/src/pages/dashboards/ExecutiveDashboard.jsx b/frontend/src
          </div>
 -        <div className="thrs-main-dashboard__agency-grid">
 +        <div className="thrs-main-dashboard__agency-grid thrs-main-dashboard__v6-business-grid">
+           <ClientStatsWidget
