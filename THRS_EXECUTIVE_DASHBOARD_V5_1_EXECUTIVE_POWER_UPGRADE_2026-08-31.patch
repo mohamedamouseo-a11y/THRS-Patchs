@@ -2,6 +2,7 @@ diff --git a/frontend/src/pages/dashboards/ExecutiveDashboard.jsx b/frontend/src
 --- a/frontend/src/pages/dashboards/ExecutiveDashboard.jsx
 +++ b/frontend/src/pages/dashboards/ExecutiveDashboard.jsx
 @@ -39,7 +39,8 @@
+ } from 'lucide-react';
  import '../../styles/thrs-main-dashboard.css';
  import '../../styles/thrs-main-dashboard-v3.css';
  import '../../styles/thrs-main-dashboard-v4.css';
